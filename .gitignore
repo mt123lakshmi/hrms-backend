@@ -1,6 +1,17 @@
+# Virtual env
 env/
 venv/
+
+# Python
 __pycache__/
 *.pyc
+
+# Environment variables
 .env
+
+# IDE
 .vscode/
+
+# Uploads / storage (CRITICAL)
+uploads/
+storage/
