@@ -25,6 +25,7 @@ from app.models.employee_financial import EmployeeFinancialDetail
 from app.models.employee_document import EmployeeDocument
 from app.models.payslip import Payslip
 from app.models.day_type import DayType
+
 # 🔹 Import routes
 from app.auth.routes import auth_routes
 
@@ -46,6 +47,7 @@ from app.employee.routes import profile
 from app.employee.routes import emp_leave
 from app.employee.routes import emp_attendance
 from app.employee.routes.emppayslip_route import router as emp_payslip_router
+
 from app.jobs.leave_accrual import start_scheduler
 
 from app.auth.routes import password
@@ -79,7 +81,9 @@ app.add_middleware(
 # 🔥 STATIC FILES
 # ==========================
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
- 
+
+
+
 # ==========================
 # 🔹 STARTUP EVENT
 # ==========================
@@ -126,6 +130,7 @@ app.include_router(profile.router)
 app.include_router(emp_leave.router)
 app.include_router(emp_attendance.router)
 app.include_router(emp_payslip_router)
+
 # ==========================
 # 🔹 ROOT
 # ==========================

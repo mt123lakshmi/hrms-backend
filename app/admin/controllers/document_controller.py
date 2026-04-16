@@ -8,7 +8,7 @@ from app.models.emp_doctype import DocumentType
 from app.models.employee_document import EmployeeDocument
 from fastapi import HTTPException
 from sqlalchemy.orm import selectinload
-UPLOAD_DIR = "storage/documents"
+UPLOAD_DIR = "uploads/documents"
 
 
 # ===============================

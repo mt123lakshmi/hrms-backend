@@ -10,7 +10,7 @@ async def create_admin():
 
         # 🔹 Check if admin user already exists
         result = await db.execute(
-            select(User).where(User.company_email == "admin@gmail.com")
+            select(User).where(User.company_email == "saivinayganesula@gmail.com")
         )
         existing_admin = result.scalar_one_or_none()
 
@@ -31,7 +31,7 @@ async def create_admin():
 
         # 🔹 Create admin user with role_id
         admin = User(
-            company_email="admin@gmail.com",
+            company_email="saivinayganesula@gmail.com",
             password=hash_password("admin1234"),
             role_id=admin_role.id   
         )
