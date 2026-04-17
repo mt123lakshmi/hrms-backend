@@ -23,3 +23,8 @@ alembic
 apscheduler
 
 fastapi-mail
+
+aiosmtplib
+
+aiomysql
+bcrypt==4.0.1

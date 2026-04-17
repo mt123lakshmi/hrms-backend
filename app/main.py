@@ -25,7 +25,7 @@ from app.models.employee_financial import EmployeeFinancialDetail
 from app.models.employee_document import EmployeeDocument
 from app.models.payslip import Payslip
 from app.models.day_type import DayType
-
+from app.models.timesheet import TimeSheet
 # 🔹 Import routes
 from app.auth.routes import auth_routes
 
@@ -41,13 +41,14 @@ from app.admin.routes import holiday
 from app.admin.routes import asset
 from app.admin.routes import payslip
 from app.admin.routes.role import router as role_router
+from app.admin.routes.timesheet import router as timesheet_router
 # 🔥 EMPLOYEE ROUTES
 from app.employee.routes import emp_dashboard
 from app.employee.routes import profile
 from app.employee.routes import emp_leave
 from app.employee.routes import emp_attendance
 from app.employee.routes.emppayslip_route import router as emp_payslip_router
-
+from app.employee.routes import emp_timesheet
 from app.jobs.leave_accrual import start_scheduler
 
 from app.auth.routes import password
@@ -122,6 +123,8 @@ app.include_router(holiday.router)
 app.include_router(asset.router)
 app.include_router(payslip.router)
 app.include_router(role_router)
+app.include_router(timesheet_router)
+
 # ==========================
 # 👨‍💻 EMPLOYEE ROUTES
 # ==========================
@@ -130,7 +133,7 @@ app.include_router(profile.router)
 app.include_router(emp_leave.router)
 app.include_router(emp_attendance.router)
 app.include_router(emp_payslip_router)
-
+app.include_router(emp_timesheet.router)
 # ==========================
 # 🔹 ROOT
 # ==========================

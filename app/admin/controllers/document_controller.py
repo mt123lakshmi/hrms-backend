@@ -32,7 +32,7 @@ async def upload_document_controller(emp_id, document_type_id, file, db: AsyncSe
     if not doc_type:
         raise HTTPException(status_code=400, detail="Invalid document type")
 
-    file_path = None  # ✅ important
+    file_path = None 
 
     # ===============================
     # 🔹 HANDLE FILE (OPTIONAL NOW)
@@ -63,7 +63,7 @@ async def upload_document_controller(emp_id, document_type_id, file, db: AsyncSe
 
     return {
         "success": True,
-        "message": "Document uploaded" if file else "Document created without file",  # ✅ clear feedback
+        "message": "Document uploaded" if file else "Document created without file",  
         "data": {
             "id": doc.id,
             "document_type": doc_type.name,
@@ -77,7 +77,7 @@ async def get_documents_controller(emp_id, db: AsyncSession):
 
     result = await db.execute(
         select(EmployeeDocument)
-        .options(selectinload(EmployeeDocument.document_type))  # ✅ FIX
+        .options(selectinload(EmployeeDocument.document_type))  
         .where(EmployeeDocument.employee_id == emp_id)
     )
 

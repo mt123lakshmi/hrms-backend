@@ -5,9 +5,13 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
+import asyncio   # ✅ added
 
 from app.models.payslip import Payslip
 from app.models.employee import Employee
+
+# ✅ IMPORT EMAIL FUNCTION
+from app.utils.send_email import send_payslip_email
 
 
 # ===============================
@@ -23,7 +27,7 @@ UPLOAD_DIR = os.path.join(BASE_DIR, "uploads", "payslips")
 async def get_employees_with_payslips(db: AsyncSession):
 
     result = await db.execute(
-        select(Employee)   # ✅ FIXED
+        select(Employee)
     )
 
     employees = result.scalars().all()
@@ -53,7 +57,7 @@ async def get_employee_payslips(employee_id: int, db: AsyncSession, user):
     result = await db.execute(
         select(Payslip, Employee)
         .join(Employee, Payslip.employee_id == Employee.id)
-        .where(Payslip.employee_id == employee_id)   # ✅ FIXED
+        .where(Payslip.employee_id == employee_id)
     )
 
     records = result.all()
@@ -77,7 +81,7 @@ async def get_employee_payslips(employee_id: int, db: AsyncSession, user):
 
 
 # ===============================
-# 🔹 UPLOAD PAYSLIP
+# 🔹 UPLOAD PAYSLIP (UPDATED WITH EMAIL)
 # ===============================
 async def upload_payslip(
     employee_id: int,
@@ -120,8 +124,7 @@ async def upload_payslip(
 
     # 🔹 fetch employee
     result = await db.execute(
-        select(Employee)   # ✅ FIXED
-        .where(Employee.id == employee_id)
+        select(Employee).where(Employee.id == employee_id)
     )
     employee = result.scalar_one_or_none()
 
@@ -152,6 +155,17 @@ async def upload_payslip(
     db.add(payslip)
     await db.commit()
     await db.refresh(payslip)
+
+    # ===============================
+    # 🔥 SEND EMAIL (ADDED)
+    # ===============================
+    if employee.company_email:
+        try:
+            asyncio.create_task(
+                send_payslip_email(employee.company_email, file_path)
+            )
+        except Exception as e:
+            print("Email failed:", str(e))   # don't break API
 
     return {
         "success": True,
