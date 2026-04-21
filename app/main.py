@@ -13,7 +13,7 @@ from app.core.init_db import create_admin
 from app.models.user import User
 from app.models.employee import Employee
 from app.auth.routes import auth_routes
-
+ 
 from app.models.attendance import Attendance
 from app.models.leave_type import LeaveType
 from app.models.leave_request import LeaveRequest
@@ -28,7 +28,7 @@ from app.models.day_type import DayType
 from app.models.timesheet import TimeSheet
 # 🔹 Import routes
 from app.auth.routes import auth_routes
-
+ 
  
 # 🔥 ADMIN ROUTES
 from app.admin.routes import dashboard as admin_dashboard
@@ -50,7 +50,7 @@ from app.employee.routes import emp_attendance
 from app.employee.routes.emppayslip_route import router as emp_payslip_router
 from app.employee.routes import emp_timesheet
 from app.jobs.leave_accrual import start_scheduler
-
+ 
 from app.auth.routes import password
 # ==========================
 # 🔥 INIT APP
@@ -67,7 +67,10 @@ security = HTTPBearer()
 # 🔥 CORS CONFIG
 # ==========================
 origins = [
-  "*",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
 ]
  
 app.add_middleware(
@@ -82,9 +85,9 @@ app.add_middleware(
 # 🔥 STATIC FILES
 # ==========================
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
-
-
-
+ 
+ 
+ 
 # ==========================
 # 🔹 STARTUP EVENT
 # ==========================
@@ -124,7 +127,7 @@ app.include_router(asset.router)
 app.include_router(payslip.router)
 app.include_router(role_router)
 app.include_router(timesheet_router)
-
+ 
 # ==========================
 # 👨‍💻 EMPLOYEE ROUTES
 # ==========================

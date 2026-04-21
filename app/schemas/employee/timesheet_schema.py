@@ -1,4 +1,4 @@
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, validator, model_validator
 from datetime import datetime, date, time
 from typing import Optional
 
@@ -9,7 +9,7 @@ class TimeSheetCreate(BaseModel):
     check_out: Optional[time] = None
     work_update: Optional[str] = None
 
-    # ✅ FIXED DATE FORMAT (accept both)
+    # ✅ DATE FORMAT
     @validator("date", pre=True)
     def parse_date(cls, v):
         if isinstance(v, date):
@@ -23,7 +23,7 @@ class TimeSheetCreate(BaseModel):
 
         raise ValueError("Date must be MM/DD/YYYY or YYYY-MM-DD")
 
-    # ✅ FIXED TIME PARSER
+    # ✅ TIME PARSER
     @validator("check_in", "check_out", pre=True)
     def parse_time(cls, v):
         if not v:
@@ -46,7 +46,7 @@ class TimeSheetCreate(BaseModel):
         except:
             raise ValueError("Time must be HH:MM AM/PM (e.g. 06:30 PM)")
 
-    # ✅ FIXED CHECK-OUT VALIDATION (use actual date)
+    # ✅ CHECK-OUT VALIDATION
     @validator("check_out")
     def validate_checkout(cls, v, values):
         check_in = values.get("check_in")
@@ -61,18 +61,14 @@ class TimeSheetCreate(BaseModel):
 
         return v
 
-    # ✅ REQUIRE ACTION (CORRECT)
-    @validator("work_update", always=True)
-    def validate_action(cls, v, values):
-        if not values.get("check_in") and not values.get("check_out"):
-            raise ValueError("Provide at least check_in or check_out")
-        return v
-
-
-from pydantic import BaseModel
-from datetime import date
-from typing import Optional
-
+    # 🔥 FIXED FOR PYDANTIC V2
+    @model_validator(mode="after")
+    def validate_at_least_one_field(self):
+        if not (self.check_in or self.check_out or self.work_update):
+            raise ValueError(
+                "Provide at least one field (check_in, check_out, work_update)"
+            )
+        return self
 
 class TimeSheetResponse(BaseModel):
     id: int

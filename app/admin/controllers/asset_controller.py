@@ -3,7 +3,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from datetime import datetime
- 
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font
+import io
 from app.models.employee_asset import EmployeeAsset
  
  
@@ -88,3 +91,89 @@ async def asset_action_controller(asset_id: int, data, db: AsyncSession):
         "success": True,
         "message": f"Asset {data.action} successful"
     }
+
+
+async def download_assets_excel_controller(db: AsyncSession):
+
+    result = await db.execute(
+        select(EmployeeAsset).options(
+            selectinload(EmployeeAsset.employee)
+        )
+    )
+
+    assets = result.scalars().all()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Assets"
+
+    # =========================
+    # HEADER
+    # =========================
+    headers = [
+        "Asset ID",
+        "Employee",
+        "Laptop ID",
+        "Access Card",
+        "Additional Assets",
+        "Status",
+        "Unassign Reason"
+    ]
+
+    ws.append(headers)
+
+    # Bold header
+    for col in range(1, len(headers) + 1):
+        ws.cell(row=1, column=col).font = Font(bold=True)
+
+    # =========================
+    # DATA
+    # =========================
+    for a in assets:
+        raw_assets = a.additional_asset or ""
+
+        # 🔥 FIX: split and format
+        asset_list = [x.strip() for x in raw_assets.split(",") if x.strip()]
+        formatted_assets = "\n".join(asset_list)
+
+        ws.append([
+            a.id,
+            a.employee.name if a.employee else "",
+            a.laptop_asset_id,
+            a.access_card,
+            formatted_assets,
+            a.status,
+            a.return_reason if a.status == "unassigned" else ""
+        ])
+
+        # 🔥 IMPORTANT → wrap text
+        cell = ws.cell(row=ws.max_row, column=5)
+        cell.alignment = Alignment(wrap_text=True)
+
+    # =========================
+    # AUTO WIDTH (NO "...")
+    # =========================
+    for col in ws.columns:
+        max_length = 0
+        col_letter = col[0].column_letter
+
+        for cell in col:
+            if cell.value:
+                max_length = max(max_length, len(str(cell.value)))
+
+        ws.column_dimensions[col_letter].width = min(max_length + 2, 50)
+
+    # =========================
+    # STREAM FILE
+    # =========================
+    stream = io.BytesIO()
+    wb.save(stream)
+    stream.seek(0)
+
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": "attachment; filename=employee_assets.xlsx"
+        }
+    )

@@ -10,7 +10,8 @@ from app.admin.controllers.document_controller import (
     get_documents_controller,
     get_document_by_id_controller,
     get_document_types_controller,
-    create_document_type
+    create_document_type,
+    update_document_controller
 )
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
@@ -60,3 +61,17 @@ async def create_document_type_api(
     db: AsyncSession = Depends(get_db)
 ):
     return await create_document_type(db, data)
+
+
+@router.put("/{document_id}")
+async def update_document(
+    document_id: int,
+    file: UploadFile = File(...),  # REQUIRED file
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(admin_required)
+):
+    return await update_document_controller(
+        db=db,
+        document_id=document_id,
+        file=file
+    )

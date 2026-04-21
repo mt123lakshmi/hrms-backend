@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from fastapi import HTTPException
-from datetime import date as dt_date, datetime
+from datetime import date as dt_date, datetime,timedelta
 
 from app.models.timesheet import TimeSheet
 from app.utils.time_utils import calculate_duration
@@ -18,11 +18,11 @@ def format_time(t):
 # =========================
 async def upsert_timesheet(db: AsyncSession, employee_id: int, data):
 
-    # ✅ REQUIRE ACTION (FIXED)
-    if not data.check_in and not data.check_out:
+    # ✅ FIXED: allow work_update also
+    if not (data.check_in or data.check_out or data.work_update):
         raise HTTPException(
             status_code=400,
-            detail="Provide check_in or check_out"
+            detail="Provide at least one field (check_in, check_out, work_update)"
         )
 
     # ✅ PREVENT FUTURE DATE
@@ -41,14 +41,14 @@ async def upsert_timesheet(db: AsyncSession, employee_id: int, data):
     # CREATE (NEW ENTRY)
     # =========================
     if not ts:
-        if not data.check_in:
-            raise HTTPException(status_code=400, detail="Check-in required first")
+
+        # ❌ REMOVED: forcing check-in first
 
         ts = TimeSheet(
             employee_id=employee_id,
             date=data.date,
             check_in=data.check_in,
-            check_out=data.check_out,  # ✅ allow both
+            check_out=data.check_out,
             work_update=data.work_update,
             work_status="Pending",
             approval_status="Pending"
@@ -79,7 +79,7 @@ async def upsert_timesheet(db: AsyncSession, employee_id: int, data):
         if data.check_in and not ts.check_in:
             ts.check_in = data.check_in
 
-        # ✅ CHECK-OUT LOGIC (FIXED)
+        # ✅ CHECK-OUT LOGIC
         if data.check_out:
             if not ts.check_in:
                 raise HTTPException(status_code=400, detail="Check-in missing")
@@ -95,10 +95,8 @@ async def upsert_timesheet(db: AsyncSession, employee_id: int, data):
 
             ts.check_out = data.check_out
 
-        # ✅ WORK UPDATE (CONTROLLED)
+        # ✅ FIXED: allow work_update independently
         if data.work_update:
-            if not ts.check_in:
-                raise HTTPException(status_code=400, detail="Check-in required first")
             ts.work_update = data.work_update
 
         # ✅ CALCULATE DURATION
@@ -116,9 +114,14 @@ async def upsert_timesheet(db: AsyncSession, employee_id: int, data):
 # =========================
 async def get_employee_timesheets(db: AsyncSession, employee_id: int):
 
+    last_45_days = datetime.now().date() - timedelta(days=45)
+
     stmt = (
         select(TimeSheet)
-        .where(TimeSheet.employee_id == employee_id)
+        .where(
+            TimeSheet.employee_id == employee_id,
+            TimeSheet.date >= last_45_days   # ✅ THIS IS THE FIX
+        )
         .order_by(TimeSheet.date.desc())
     )
 
@@ -129,8 +132,8 @@ async def get_employee_timesheets(db: AsyncSession, employee_id: int):
         {
             "id": r.id,
             "date": r.date,
-            "check_in": format_time(r.check_in),   # ✅ 12-hour
-            "check_out": format_time(r.check_out), # ✅ 12-hour
+            "check_in": format_time(r.check_in),
+            "check_out": format_time(r.check_out),
             "duration": r.duration,
             "work_update": r.work_update,
             "approval_status": r.approval_status,

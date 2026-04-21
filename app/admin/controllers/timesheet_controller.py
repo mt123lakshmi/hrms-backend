@@ -1,7 +1,8 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, text
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timedelta
 
 from app.models.timesheet import TimeSheet
 from app.models.employee import Employee
@@ -47,7 +48,7 @@ async def get_latest_timesheets(db: AsyncSession):
             },
 
             "latest_entry": {
-                "timesheet_id": ts.id if ts else None,   # ✅ ADDED
+                "timesheet_id": ts.id if ts else None,
 
                 "date": ts.date if ts else None,
                 "day": ts.date.strftime("%a") if ts else None,
@@ -105,7 +106,7 @@ async def get_latest_timesheet_by_employee(
             "designation": emp.designation
         },
         "latest_entry": {
-            "timesheet_id": ts.id,   # ✅ ADDED
+            "timesheet_id": ts.id,
 
             "date": ts.date,
             "day": ts.date.strftime("%a"),
@@ -121,13 +122,18 @@ async def get_latest_timesheet_by_employee(
     }
 
 
-# ✅ GET HISTORY
+# ✅ GET HISTORY (FIXED → 45 DAYS + 12-HOUR FORMAT)
 async def get_employee_history(db: AsyncSession, employee_id: int):
+
+    last_45_days = datetime.now() - timedelta(days=45)
 
     stmt = (
         select(TimeSheet, Employee)
         .join(Employee, Employee.id == TimeSheet.employee_id)
-        .where(TimeSheet.employee_id == employee_id)
+        .where(
+            TimeSheet.employee_id == employee_id,
+            TimeSheet.date >= last_45_days
+        )
         .order_by(TimeSheet.date.desc())
     )
 
@@ -135,21 +141,24 @@ async def get_employee_history(db: AsyncSession, employee_id: int):
     records = result.all()
 
     if not records:
-        return []   # ✅ FIXED (no exception)
+        return []
 
     data = []
 
     for ts, emp in records:
         data.append({
-            "timesheet_id": ts.id,   # ✅ ADDED
+            "timesheet_id": ts.id,
 
             "employee_name": emp.name,
             "employee_code": emp.employee_code,
             "designation": emp.designation,
 
             "date": ts.date,
-            "check_in": ts.check_in,
-            "check_out": ts.check_out,
+
+            # ✅ FIX APPLIED HERE
+            "check_in": ts.check_in.strftime("%I:%M %p") if ts.check_in else None,
+            "check_out": ts.check_out.strftime("%I:%M %p") if ts.check_out else None,
+
             "duration": calculate_duration(ts.check_in, ts.check_out),
 
             "work_update": ts.work_update,
@@ -161,7 +170,7 @@ async def get_employee_history(db: AsyncSession, employee_id: int):
     return data
 
 
-# ✅ APPROVE / REJECT
+# ✅ APPROVE / REJECT (UNCHANGED)
 async def timesheet_action(
     db: AsyncSession,
     timesheet_id: int,
@@ -214,3 +223,15 @@ async def timesheet_action(
         "approval_status": ts.approval_status,
         "work_status": ts.work_status
     }
+
+
+# ✅ AUTO DELETE OLD DATA (1 YEAR CLEANUP)
+async def delete_old_timesheets(db: AsyncSession):
+
+    query = text("""
+        DELETE FROM timesheet
+        WHERE date < NOW() - INTERVAL 365 DAY
+    """)
+
+    await db.execute(query)
+    await db.commit()

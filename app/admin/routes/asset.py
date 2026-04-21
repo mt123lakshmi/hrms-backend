@@ -9,7 +9,8 @@ from app.core.dependencies import admin_required
 from app.schemas.admin.asset_schema import AssetActionRequest
 from app.admin.controllers.asset_controller import (
     get_assets_controller,
-    asset_action_controller
+    asset_action_controller,
+    download_assets_excel_controller
 )
 
 router = APIRouter(
@@ -36,3 +37,10 @@ async def asset_action(
     user = Depends(admin_required)
 ):
     return await asset_action_controller(asset_id, data, db)
+
+@router.get("/download")
+async def download_assets(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(admin_required)
+):
+    return await download_assets_excel_controller(db)
