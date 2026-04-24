@@ -41,3 +41,27 @@ HR Team
 
     fm = FastMail(conf)
     await fm.send_message(message)
+
+
+async def send_timesheet_rejection_email(email: str, log):
+
+    message = MessageSchema(
+        subject="Timesheet Rejected",
+        recipients=[email],
+        body=f"""
+Your timesheet has been rejected.
+
+Date: {log.date}
+Check-in: {log.check_in}
+Check-out: {log.check_out}
+
+Reason:
+{log.rejection_reason}
+
+Please update and resubmit.
+        """,
+        subtype="plain"
+    )
+
+    fm = FastMail(conf)
+    await fm.send_message(message)

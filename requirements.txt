@@ -29,3 +29,4 @@ aiosmtplib
 aiomysql
 bcrypt==4.0.1
 openpyxl
+boto3

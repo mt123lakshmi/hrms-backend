@@ -1,26 +1,23 @@
 from datetime import date
 import os
-import shutil
 import uuid
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.employee_document import EmployeeDocument
 from app.models.employee import Employee
 from app.models.leave_request import LeaveRequest
 from app.models.user import User
 from app.models.employee_asset import EmployeeAsset
 from app.models.employee_financial import EmployeeFinancialDetail
-from app.models.employee_document import EmployeeDocument
 from app.models.payslip import Payslip
 from app.models.role import Role
 from app.core.security import hash_password
 
 from app.utils.employee_helper import get_employee_or_404
-
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+from app.utils.s3bucket import upload_file_to_s3  # ✅ S3 helper
 
 
 # ===============================
@@ -56,7 +53,7 @@ async def get_employee_list_controller(db: AsyncSession, user):
             "name": emp.name,
             "email": emp.company_email,
             "employee_code": emp.employee_code,
-            "designation": emp.designation,  
+            "designation": emp.designation,
             "status": status,
             "photo": emp.photo
         })
@@ -73,7 +70,6 @@ async def create_employee_controller(data, photo, db, user):
         raise HTTPException(status_code=403, detail="Admin only")
 
     try:
-        # ROLE VALIDATION
         role_result = await db.execute(
             select(Role).where(Role.id == data["role"])
         )
@@ -82,14 +78,12 @@ async def create_employee_controller(data, photo, db, user):
         if not role_obj:
             raise HTTPException(status_code=400, detail="Invalid role")
 
-        # EMAIL CHECK
         result = await db.execute(
             select(User).where(User.company_email == data["company_email"])
         )
         if result.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="Email already exists")
 
-        # EMPLOYEE CODE CHECK
         result = await db.execute(
             select(Employee).where(Employee.employee_code == data["employee_code"])
         )
@@ -101,15 +95,17 @@ async def create_employee_controller(data, photo, db, user):
             if not photo.content_type.startswith("image/"):
                 raise HTTPException(status_code=400, detail="Only image files allowed")
 
-            filename = f"{uuid.uuid4()}_{photo.filename}"
-            file_location = os.path.join("uploads", filename)
+            file_bytes = photo.file.read()
 
-            with open(file_location, "wb") as buffer:
-                shutil.copyfileobj(photo.file, buffer)
+            if not file_bytes:
+                raise HTTPException(status_code=400, detail="Empty image")
 
-            photo_path = file_location
+            content_type = photo.content_type or "image/jpeg"
+            unique_name = f"{uuid.uuid4().hex}_{photo.filename}"
+            s3_key = f"employee-photos/{unique_name}"
 
-        # CREATE EMPLOYEE
+            photo_path = upload_file_to_s3(file_bytes, s3_key, content_type)
+
         emp = Employee(
             employee_code=data["employee_code"],
             name=data["name"],
@@ -117,14 +113,13 @@ async def create_employee_controller(data, photo, db, user):
             address=data["address"],
             company_email=data["company_email"],
             personal_email=data["personal_email"],
-            designation=data["designation"],  
+            designation=data["designation"],
             photo=photo_path
         )
 
         db.add(emp)
         await db.flush()
 
-        # CREATE USER
         db.add(User(
             company_email=data["company_email"],
             password=hash_password(data["password"]),
@@ -132,15 +127,16 @@ async def create_employee_controller(data, photo, db, user):
             employee_id=emp.id
         ))
 
-        # FINANCIAL
+        # ✅ FIXED HERE
         db.add(EmployeeFinancialDetail(
             employee_id=emp.id,
             bank_account_number=data["bank_account"],
-            bank_name="Default Bank",
-            ifsc_code="IFSC0001",
+            bank_name=data.get("bank_name"),
+            ifsc_code=data.get("ifsc_code"),
             pan_number=data["pan_number"],
             uan_pf_number=data["uan_number"]
         ))
+
         def is_valid(val):
             return val not in [None, "", "string"]
 
@@ -150,8 +146,6 @@ async def create_employee_controller(data, photo, db, user):
             is_valid(data.get("assets"))
         ])
 
-
-        # ASSETS
         db.add(EmployeeAsset(
             employee_id=emp.id,
             access_card=data.get("access_card"),
@@ -209,7 +203,6 @@ async def get_employee_full_profile(employee_id: int, db, user):
             "designation": employee.designation,
             "photo": employee.photo
         },
-
         "financial": {
             "bank_account": employee.financial_detail.bank_account_number if employee.financial_detail else None,
             "bank_name": employee.financial_detail.bank_name if employee.financial_detail else None,
@@ -217,7 +210,6 @@ async def get_employee_full_profile(employee_id: int, db, user):
             "pan": employee.financial_detail.pan_number if employee.financial_detail else None,
             "uan": employee.financial_detail.uan_pf_number if employee.financial_detail else None,
         },
-
         "assets": [
             {
                 "access_card": a.access_card,
@@ -226,7 +218,6 @@ async def get_employee_full_profile(employee_id: int, db, user):
             }
             for a in (employee.assets or [])
         ],
-
         "documents": [
             {
                 "type": d.document_type.name if d.document_type else None,
@@ -234,7 +225,6 @@ async def get_employee_full_profile(employee_id: int, db, user):
             }
             for d in (employee.documents or [])
         ],
-
         "payslips": [
             {
                 "id": p.id,
@@ -244,6 +234,8 @@ async def get_employee_full_profile(employee_id: int, db, user):
             for p in (employee.payslips or [])
         ]
     }
+
+
 # ===============================
 # 🔹 UPDATE EMPLOYEE
 # ===============================
@@ -256,7 +248,9 @@ async def update_employee_controller(emp_id, data, photo, db: AsyncSession, user
         raise HTTPException(403, "Admin only")
 
     try:
-        # 🔹 GET EMPLOYEE
+        # ===============================
+        # 🔹 FETCH EMPLOYEE
+        # ===============================
         result = await db.execute(
             select(Employee).where(Employee.id == emp_id)
         )
@@ -267,106 +261,125 @@ async def update_employee_controller(emp_id, data, photo, db: AsyncSession, user
 
         update_data = data if isinstance(data, dict) else data.dict(exclude_unset=True)
 
-        # ✅ FIXED VALIDATION
         def is_valid(value):
-            return value not in [None, "", "string"]
+            return value is not None and str(value).strip() != "" and value != "string"
 
-        # 🔹 FETCH USER ONCE
+        # ===============================
+        # 🔹 FETCH USER
+        # ===============================
         result = await db.execute(
             select(User).where(User.employee_id == emp_id)
         )
         user_obj = result.scalar_one_or_none()
 
         # ===============================
-        # 🔹 BASIC FIELDS
+        # 🔹 BASIC FIELD UPDATE
         # ===============================
-        for field in [
-            "name", "phone_number", "address",
-            "company_email", "personal_email"
-        ]:
+        for field in ["name", "phone_number", "address", "company_email", "personal_email"]:
             if field in update_data and is_valid(update_data[field]):
                 setattr(employee, field, update_data[field])
 
-        # ===============================
-        # 🔥 SYNC EMAIL WITH USER TABLE
-        # ===============================
-        if "company_email" in update_data and is_valid(update_data["company_email"]):
-            if user_obj:
-                user_obj.company_email = update_data["company_email"]
-
-        # ===============================
-        # 🔹 DESIGNATION (STRING)
-        # ===============================
         if "designation" in update_data and is_valid(update_data["designation"]):
             employee.designation = update_data["designation"]
 
         # ===============================
-        # 🔹 PASSWORD
+        # 🔹 USER UPDATE
         # ===============================
-        if "password" in update_data and is_valid(update_data["password"]):
-            if user_obj:
+        if user_obj:
+            if "company_email" in update_data and is_valid(update_data["company_email"]):
+                user_obj.company_email = update_data["company_email"]
+
+            if "password" in update_data and is_valid(update_data["password"]):
                 user_obj.password = hash_password(update_data["password"])
 
         # ===============================
-        # 🔹 PHOTO
+        # 🔹 PHOTO UPDATE (S3)
         # ===============================
         if photo:
             if not photo.content_type.startswith("image/"):
-                raise HTTPException(400, "Only image files allowed")
+                raise HTTPException(status_code=400, detail="Only image files allowed")
 
-            filename = f"{uuid.uuid4()}_{photo.filename}"
-            file_location = os.path.join(UPLOAD_DIR, filename)
+            file_bytes = photo.file.read()
+            if not file_bytes:
+                raise HTTPException(status_code=400, detail="Empty image")
 
-            with open(file_location, "wb") as buffer:
-                shutil.copyfileobj(photo.file, buffer)
+            content_type = photo.content_type or "image/jpeg"
+            s3_key = f"employee-photos/{uuid.uuid4().hex}_{photo.filename}"
 
-            employee.photo = file_location
+            employee.photo = upload_file_to_s3(file_bytes, s3_key, content_type)
 
         # ===============================
-        # 🔹 UPDATE ASSETS (FIXED)
+        # 🔹 FINANCIAL UPDATE
+        # ===============================
+        result = await db.execute(
+            select(EmployeeFinancialDetail).where(
+                EmployeeFinancialDetail.employee_id == emp_id
+            )
+        )
+        financial = result.scalar_one_or_none()
+
+        if financial:
+            if "bank_account" in update_data and is_valid(update_data.get("bank_account")):
+                financial.bank_account_number = update_data.get("bank_account")
+
+            if "bank_name" in update_data and is_valid(update_data.get("bank_name")):
+                financial.bank_name = update_data.get("bank_name")
+
+            if "ifsc_code" in update_data and is_valid(update_data.get("ifsc_code")):
+                financial.ifsc_code = update_data.get("ifsc_code")
+
+            if "pan_number" in update_data and is_valid(update_data.get("pan_number")):
+                financial.pan_number = update_data.get("pan_number")
+
+            if "uan_number" in update_data and is_valid(update_data.get("uan_number")):
+                financial.uan_pf_number = update_data.get("uan_number")
+
+        # ===============================
+        # 🔹 ASSET UPDATE (FIXED)
         # ===============================
         result = await db.execute(
             select(EmployeeAsset).where(EmployeeAsset.employee_id == emp_id)
         )
-        asset_obj = result.scalar_one_or_none()
+        asset = result.scalar_one_or_none()
 
-        def is_valid_asset(val):
-            return val not in [None, "", "string"]
+        if asset:
+            if "access_card" in update_data and is_valid(update_data.get("access_card")):
+                asset.access_card = update_data.get("access_card")
 
-        has_asset = any([
-            is_valid_asset(update_data.get("access_card")),
-            is_valid_asset(update_data.get("laptop_id")),
-            is_valid_asset(update_data.get("assets"))
-        ])
+            if "laptop_id" in update_data and is_valid(update_data.get("laptop_id")):
+                asset.laptop_asset_id = update_data.get("laptop_id")
 
-        if asset_obj:
-            if "access_card" in update_data:
-                asset_obj.access_card = update_data.get("access_card")
+            if "assets" in update_data and is_valid(update_data.get("assets")):
+                asset.additional_asset = update_data.get("assets")
 
-            if "laptop_id" in update_data:
-                asset_obj.laptop_asset_id = update_data.get("laptop_id")
+            # update status dynamically
+            has_asset = any([
+                is_valid(asset.access_card),
+                is_valid(asset.laptop_asset_id),
+                is_valid(asset.additional_asset)
+            ])
 
-            if "assets" in update_data:
-                asset_obj.additional_asset = update_data.get("assets")
-
-            # ✅ FIXED STATUS LOGIC
-            asset_obj.status = "assigned" if any([
-                is_valid_asset(asset_obj.access_card),
-                is_valid_asset(asset_obj.laptop_asset_id),
-                is_valid_asset(asset_obj.additional_asset)
-            ]) else "unassigned"
+            asset.status = "assigned" if has_asset else "unassigned"
 
         else:
-            if has_asset:
-                db.add(EmployeeAsset(
-                    employee_id=emp_id,
-                    access_card=update_data.get("access_card"),
-                    laptop_asset_id=update_data.get("laptop_id"),
-                    additional_asset=update_data.get("assets"),
-                    status="assigned"
-                ))
+            # create asset if not exists
+            has_asset = any([
+                is_valid(update_data.get("access_card")),
+                is_valid(update_data.get("laptop_id")),
+                is_valid(update_data.get("assets"))
+            ])
 
-        # 🔹 SAVE
+            db.add(EmployeeAsset(
+                employee_id=emp_id,
+                access_card=update_data.get("access_card"),
+                laptop_asset_id=update_data.get("laptop_id"),
+                additional_asset=update_data.get("assets"),
+                status="assigned" if has_asset else "unassigned"
+            ))
+
+        # ===============================
+        # 🔹 COMMIT
+        # ===============================
         await db.commit()
 
         return {
@@ -376,10 +389,7 @@ async def update_employee_controller(emp_id, data, photo, db: AsyncSession, user
 
     except Exception as e:
         await db.rollback()
-        return {
-            "success": False,
-            "message": str(e)
-        }
+        raise HTTPException(status_code=500, detail=str(e))
 # ===============================
 # 🔹 DELETE EMPLOYEE
 # ===============================

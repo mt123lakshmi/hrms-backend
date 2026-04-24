@@ -11,7 +11,8 @@ from app.admin.controllers.document_controller import (
     get_document_by_id_controller,
     get_document_types_controller,
     create_document_type,
-    update_document_controller
+    update_document_controller,
+    download_document_controller
 )
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
@@ -75,3 +76,11 @@ async def update_document(
         document_id=document_id,
         file=file
     )
+
+@router.get("/download/{document_id}")
+async def download_document(
+    document_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(admin_required)
+):
+    return await download_document_controller(document_id, db)

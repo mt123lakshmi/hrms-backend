@@ -42,11 +42,14 @@ async def create_employee(
 
     password: str = Form(...),
     role: int = Form(...),
+
     bank_account: str = Form(...),
+    bank_name: str = Form(...),        # ✅ ADD THIS
+    ifsc_code: str = Form(...),        # ✅ ADD THIS
+
     pan_number: str = Form(...),
     uan_number: str = Form(...),
 
-    # ✅ ONLY THESE 3 CHANGED (made optional)
     access_card: Optional[str] = Form(None),
     laptop_id: Optional[str] = Form(None),
     assets: Optional[str] = Form(None),
@@ -68,18 +71,20 @@ async def create_employee(
 
         "password": password,
         "role": role,
+
         "bank_account": bank_account,
+        "bank_name": bank_name,      # ✅ ADD THIS
+        "ifsc_code": ifsc_code,      # ✅ ADD THIS
+
         "pan_number": pan_number,
         "uan_number": uan_number,
 
-        # stays same (no break)
         "access_card": access_card,
         "laptop_id": laptop_id,
         "assets": assets,
     }
 
     return await create_employee_controller(data, photo, db, user)
-
 
 # ===============================
 # 🔹 GET PROFILE
@@ -107,11 +112,14 @@ async def update_employee(
     designation: str = Form(None),
 
     password: str = Form(None),
+
     bank_account: str = Form(None),
+    bank_name: str = Form(None),     # ✅ ADD THIS
+    ifsc_code: str = Form(None),     # ✅ ADD THIS
+
     pan_number: str = Form(None),
     uan_number: str = Form(None),
 
-    # already optional ✔️
     access_card: str = Form(None),
     laptop_id: str = Form(None),
     assets: str = Form(None),
@@ -131,7 +139,11 @@ async def update_employee(
         "designation": designation,
 
         "password": password,
+
         "bank_account": bank_account,
+        "bank_name": bank_name,      # ✅ ADD THIS
+        "ifsc_code": ifsc_code,      # ✅ ADD THIS
+
         "pan_number": pan_number,
         "uan_number": uan_number,
 
@@ -141,8 +153,6 @@ async def update_employee(
     }
 
     return await update_employee_controller(emp_id, data, photo, db, user)
-
-
 # ===============================
 # 🔹 DELETE EMPLOYEE
 # ===============================

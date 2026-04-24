@@ -1,6 +1,6 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime
+from datetime import datetime, date
 
 from app.models.task import Task
 from app.models.work_log import WorkLog
@@ -10,7 +10,7 @@ from app.schemas.employee.worklog_schema import WorkLogResponse
 
 
 # ==========================
-# GET TASKS
+# GET TASKS (FIXED)
 # ==========================
 async def get_my_tasks(employee_id: int, db: AsyncSession):
 
@@ -21,39 +21,32 @@ async def get_my_tasks(employee_id: int, db: AsyncSession):
     )
 
     rows = result.all()
+    today = date.today()
 
     data = []
 
     for task, assignment in rows:
 
-        # 🔥 get latest worklog for this task
-        log_res = await db.execute(
-            select(WorkLog)
-            .where(
-                WorkLog.employee_id == employee_id,
-                WorkLog.task_id == task.id
-            )
-            .order_by(WorkLog.id.desc())
-            .limit(1)
-        )
-
-        log = log_res.scalar()
-
-        # 🔥 decide status
-        if not log:
-            status = "ASSIGNED"
-
-        elif log.status == "SUBMITTED":
+        if today <= task.end_date:
             status = "PENDING"
 
-        elif log.status == "APPROVED":
-            status = "COMPLETED"
-
-        elif log.status == "REJECTED":
-            status = "REJECTED"
-
         else:
-            status = "ASSIGNED"
+            logs_res = await db.execute(
+                select(WorkLog.status).where(
+                    WorkLog.employee_id == employee_id,
+                    WorkLog.task_id == task.id
+                )
+            )
+            logs = logs_res.scalars().all()
+
+            if logs and all(l == "APPROVED" for l in logs):
+                status = "COMPLETED"
+
+            elif any(l == "REJECTED" for l in logs):
+                status = "REJECTED"
+
+            else:
+                status = "PENDING"
 
         data.append({
             "task_id": task.id,
@@ -69,9 +62,17 @@ async def get_my_tasks(employee_id: int, db: AsyncSession):
 
 
 # ==========================
-# CREATE WORKLOG
+# CREATE WORKLOG (FIXED)
 # ==========================
 async def create_worklog(employee_id: int, data, db: AsyncSession):
+
+    task = await db.get(Task, data.task_id)
+
+    if not task:
+        return {"error": "Task not found"}
+
+    if data.date < task.start_date or data.date > task.end_date:
+        return {"error": "Cannot log outside task date range"}
 
     existing = await db.execute(
         select(WorkLog).where(
@@ -100,17 +101,14 @@ async def create_worklog(employee_id: int, data, db: AsyncSession):
     )
 
     db.add(log)
-
-    # 🔥 IMPORTANT (get ID before commit)
     await db.flush()
-
     await db.commit()
 
-    # ✅ RETURN FULL FORMATTED RESPONSE
     return WorkLogResponse.from_orm_with_format(log)
 
+
 # ==========================
-# GET HISTORY
+# GET HISTORY (UNCHANGED)
 # ==========================
 async def get_my_history(employee_id: int, db: AsyncSession):
 

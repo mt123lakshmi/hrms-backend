@@ -1,24 +1,43 @@
-import os
 import uuid
+from datetime import datetime
+import asyncio
+
 from fastapi import HTTPException, UploadFile
-from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime
-import asyncio   # ✅ added
 
 from app.models.payslip import Payslip
 from app.models.employee import Employee
 
-# ✅ IMPORT EMAIL FUNCTION
+# ✅ reuse your existing S3 helper
+from app.utils.s3bucket import upload_file_to_s3
+
+# ✅ email
 from app.utils.send_email import send_payslip_email
 
 
 # ===============================
-# 🔹 PATH SETUP
+# 🔹 COMMON S3 UPLOAD (MATCH DOCUMENT CONTROLLER)
 # ===============================
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-UPLOAD_DIR = os.path.join(BASE_DIR, "uploads", "payslips")
+async def handle_payslip_upload(file: UploadFile, employee_id: int, month: str):
+
+    if not file:
+        raise HTTPException(status_code=400, detail="File is required")
+
+    if not file.filename.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF allowed")
+
+    file_bytes = await file.read()
+
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Empty file uploaded")
+
+    content_type = file.content_type or "application/pdf"
+
+    unique_name = f"{employee_id}_{month}_{uuid.uuid4().hex}.pdf"
+    s3_key = f"payslips/{unique_name}"
+
+    return upload_file_to_s3(file_bytes, s3_key, content_type)
 
 
 # ===============================
@@ -26,10 +45,7 @@ UPLOAD_DIR = os.path.join(BASE_DIR, "uploads", "payslips")
 # ===============================
 async def get_employees_with_payslips(db: AsyncSession):
 
-    result = await db.execute(
-        select(Employee)
-    )
-
+    result = await db.execute(select(Employee))
     employees = result.scalars().all()
 
     return {
@@ -81,7 +97,7 @@ async def get_employee_payslips(employee_id: int, db: AsyncSession, user):
 
 
 # ===============================
-# 🔹 UPLOAD PAYSLIP (UPDATED WITH EMAIL)
+# 🔹 UPLOAD PAYSLIP
 # ===============================
 async def upload_payslip(
     employee_id: int,
@@ -89,9 +105,6 @@ async def upload_payslip(
     file: UploadFile,
     db: AsyncSession
 ):
-
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF allowed")
 
     # 🔹 validate month
     try:
@@ -102,7 +115,7 @@ async def upload_payslip(
         else:
             raise ValueError()
 
-        formatted_month = parsed_date.strftime("%B %Y")
+        formatted_month = parsed_date.strftime("%B_%Y").lower()
 
     except ValueError:
         raise HTTPException(
@@ -110,19 +123,17 @@ async def upload_payslip(
             detail="Month must be YYYY-MM or YYYY-MM-DD"
         )
 
-    # 🔹 check duplicate
+    # 🔹 duplicate check
     result = await db.execute(
         select(Payslip).where(
             Payslip.employee_id == employee_id,
             Payslip.month == formatted_month
         )
     )
-    existing = result.scalar_one_or_none()
-
-    if existing:
+    if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Payslip already exists")
 
-    # 🔹 fetch employee
+    # 🔹 employee check
     result = await db.execute(
         select(Employee).where(Employee.id == employee_id)
     )
@@ -131,48 +142,35 @@ async def upload_payslip(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-    safe_month = formatted_month.replace(" ", "_").lower()
-    unique_id = str(uuid.uuid4())[:8]
-    filename = f"{employee_id}_{safe_month}_{unique_id}.pdf"
-
-    file_path = os.path.join(UPLOAD_DIR, filename)
-
-    with open(file_path, "wb") as f:
-        f.write(await file.read())
-
-    relative_path = f"uploads/payslips/{filename}"
-    now = datetime.utcnow()
+    # 🔹 upload to S3
+    file_url = await handle_payslip_upload(file, employee_id, formatted_month)
 
     payslip = Payslip(
         employee_id=employee_id,
         month=formatted_month,
-        file_path=relative_path,
-        uploaded_at=now
+        file_path=file_url,
+        uploaded_at=datetime.utcnow()
     )
 
     db.add(payslip)
     await db.commit()
     await db.refresh(payslip)
 
-    # ===============================
-    # 🔥 SEND EMAIL (ADDED)
-    # ===============================
+    # 🔥 email
     if employee.company_email:
         try:
             asyncio.create_task(
-                send_payslip_email(employee.company_email, file_path)
+                send_payslip_email(employee.company_email, file_url)
             )
         except Exception as e:
-            print("Email failed:", str(e))   # don't break API
+            print("Email failed:", str(e))
 
     return {
         "success": True,
         "message": "Payslip uploaded",
         "data": {
             "payslip_id": payslip.id,
-            "file_url": relative_path
+            "file_url": file_url
         }
     }
 
@@ -194,24 +192,13 @@ async def update_payslip(
     if not payslip:
         raise HTTPException(status_code=404, detail="Payslip not found")
 
-    if not file or not file.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Valid PDF required")
+    file_url = await handle_payslip_upload(
+        file,
+        payslip.employee_id,
+        payslip.month
+    )
 
-    old_path = os.path.join(BASE_DIR, payslip.file_path)
-    if os.path.exists(old_path):
-        os.remove(old_path)
-
-    safe_month = payslip.month.replace(" ", "_").lower()
-    unique_id = str(uuid.uuid4())[:8]
-    filename = f"{payslip.employee_id}_{safe_month}_{unique_id}.pdf"
-
-    new_path = os.path.join(UPLOAD_DIR, filename)
-
-    with open(new_path, "wb") as f:
-        f.write(await file.read())
-
-    relative_path = f"uploads/payslips/{filename}"
-    payslip.file_path = relative_path
+    payslip.file_path = file_url
     payslip.uploaded_at = datetime.utcnow()
 
     await db.commit()
@@ -222,7 +209,7 @@ async def update_payslip(
         "message": "Payslip updated",
         "data": {
             "payslip_id": payslip.id,
-            "file_url": relative_path
+            "file_url": file_url
         }
     }
 
@@ -243,18 +230,7 @@ async def download_payslip(payslip_id: int, db: AsyncSession, user):
     if user.role == "employee" and user.employee_id != payslip.employee_id:
         raise HTTPException(status_code=403, detail="Not allowed")
 
-    absolute_path = os.path.join(BASE_DIR, payslip.file_path)
-
-    if not os.path.exists(absolute_path):
-        raise HTTPException(status_code=404, detail="File not found")
-
-    return FileResponse(
-        path=absolute_path,
-        filename=os.path.basename(absolute_path),
-        media_type="application/pdf",
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0"
-        }
-    )
+    return {
+        "success": True,
+        "download_url": payslip.file_path
+    }

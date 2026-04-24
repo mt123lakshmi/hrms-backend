@@ -1,29 +1,57 @@
-import os
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+from fastapi import HTTPException, UploadFile
+
 from app.models.emp_doctype import DocumentType
 from app.models.employee import Employee
 from app.models.employee_document import EmployeeDocument
-from fastapi import HTTPException, UploadFile
-from sqlalchemy.orm import selectinload
 
-UPLOAD_DIR = "uploads/documents"
+from app.utils.s3bucket import upload_file_to_s3
+from app.utils.s3bucket import (
+    extract_s3_key,
+    generate_presigned_download_url
+)
+
+# ===============================
+# 🔹 COMMON FILE UPLOAD HELPER
+# ===============================
+async def handle_s3_upload(file: UploadFile, emp_id: int, document_type_id: int):
+    if not file:
+        raise HTTPException(status_code=400, detail="File is required")
+
+    file_bytes = await file.read()
+
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Empty file uploaded")
+
+    content_type = file.content_type or "application/octet-stream"
+
+    unique_name = f"{emp_id}_{document_type_id}_{uuid.uuid4().hex}_{file.filename}"
+    s3_key = f"employee-documents/{unique_name}"
+
+    return upload_file_to_s3(file_bytes, s3_key, content_type)
 
 
 # ===============================
-# 🔹 UPLOAD DOCUMENT (FIXED)
+# 🔹 UPLOAD DOCUMENT
 # ===============================
-async def upload_document_controller(emp_id, document_type_id, file, db: AsyncSession):
+async def upload_document_controller(
+    emp_id: int,
+    document_type_id: int,
+    file: UploadFile,
+    db: AsyncSession
+):
 
-    # 🔹 check employee
+    # check employee
     result = await db.execute(select(Employee).where(Employee.id == emp_id))
     employee = result.scalar_one_or_none()
 
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    # 🔹 check document type
+    # check document type
     result = await db.execute(
         select(DocumentType).where(DocumentType.id == document_type_id)
     )
@@ -32,7 +60,7 @@ async def upload_document_controller(emp_id, document_type_id, file, db: AsyncSe
     if not doc_type:
         raise HTTPException(status_code=400, detail="Invalid document type")
 
-    # 🔹 check if document already exists (🔥 MAIN FIX)
+    # check existing document
     result = await db.execute(
         select(EmployeeDocument).where(
             EmployeeDocument.employee_id == emp_id,
@@ -41,30 +69,11 @@ async def upload_document_controller(emp_id, document_type_id, file, db: AsyncSe
     )
     existing_doc = result.scalar_one_or_none()
 
-    file_path = None
+    file_url = await handle_s3_upload(file, emp_id, document_type_id)
 
-    # ===============================
-    # 🔹 HANDLE FILE
-    # ===============================
-    if file:
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-        unique_name = f"{emp_id}_{document_type_id}_{uuid.uuid4().hex}_{file.filename}"
-        file_path = os.path.join(UPLOAD_DIR, unique_name)
-
-        content = await file.read()
-        with open(file_path, "wb") as f:
-            f.write(content)
-
-    # ===============================
-    # 🔹 UPDATE IF EXISTS
-    # ===============================
+    # UPDATE existing
     if existing_doc:
-        # delete old file
-        if existing_doc.file_path and os.path.exists(existing_doc.file_path):
-            os.remove(existing_doc.file_path)
-
-        existing_doc.file_path = file_path
+        existing_doc.file_path = file_url
 
         await db.commit()
         await db.refresh(existing_doc)
@@ -79,13 +88,11 @@ async def upload_document_controller(emp_id, document_type_id, file, db: AsyncSe
             }
         }
 
-    # ===============================
-    # 🔹 CREATE NEW
-    # ===============================
+    # CREATE new
     doc = EmployeeDocument(
         employee_id=emp_id,
         document_type_id=document_type_id,
-        file_path=file_path
+        file_path=file_url
     )
 
     db.add(doc)
@@ -94,7 +101,7 @@ async def upload_document_controller(emp_id, document_type_id, file, db: AsyncSe
 
     return {
         "success": True,
-        "message": "Document uploaded" if file else "Document created without file",
+        "message": "Document uploaded",
         "data": {
             "id": doc.id,
             "document_type": doc_type.name,
@@ -104,9 +111,49 @@ async def upload_document_controller(emp_id, document_type_id, file, db: AsyncSe
 
 
 # ===============================
+# 🔹 UPDATE DOCUMENT
+# ===============================
+async def update_document_controller(
+    db: AsyncSession,
+    document_id: int,
+    file: UploadFile
+):
+    if not file:
+        raise HTTPException(status_code=400, detail="File is required")
+
+    result = await db.execute(
+        select(EmployeeDocument).where(EmployeeDocument.id == document_id)
+    )
+    doc = result.scalar_one_or_none()
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    file_url = await handle_s3_upload(
+        file,
+        doc.employee_id,
+        doc.document_type_id
+    )
+
+    doc.file_path = file_url
+
+    await db.commit()
+    await db.refresh(doc)
+
+    return {
+        "success": True,
+        "message": "File updated successfully",
+        "data": {
+            "id": doc.id,
+            "file_path": doc.file_path
+        }
+    }
+
+
+# ===============================
 # 🔹 GET DOCUMENTS
 # ===============================
-async def get_documents_controller(emp_id, db: AsyncSession):
+async def get_documents_controller(emp_id: int, db: AsyncSession):
 
     result = await db.execute(
         select(EmployeeDocument)
@@ -170,6 +217,43 @@ async def get_document_types_controller(db: AsyncSession):
     return {
         "success": True,
         "data": [
+            {"id": dt.id, "name": dt.name}
+            for dt in doc_types
+        ]
+    }
+
+
+# ===============================
+# 🔹 CREATE DOCUMENT TYPE
+# ===============================
+async def create_document_type(db: AsyncSession, data):
+
+    result = await db.execute(
+        select(DocumentType).where(DocumentType.name.ilike(data.name))
+    )
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        return {"error": "Document type already exists"}
+
+    new_type = DocumentType(name=data.name)
+
+    db.add(new_type)
+    await db.commit()
+    await db.refresh(new_type)
+
+    return new_type
+# ===============================
+# 🔹 GET DOCUMENT TYPES
+# ===============================
+async def get_document_types_controller(db: AsyncSession):
+
+    result = await db.execute(select(DocumentType))
+    doc_types = result.scalars().all()
+
+    return {
+        "success": True,
+        "data": [
             {
                 "id": dt.id,
                 "name": dt.name
@@ -203,44 +287,17 @@ async def create_document_type(db: AsyncSession, data):
     return new_type
 
 
-# ===============================
-# 🔹 UPDATE DOCUMENT (NO CHANGE)
-# ===============================
-async def update_document_controller(
-    db: AsyncSession,
-    document_id: int,
-    file: UploadFile
-):
+async def download_document_controller(document_id: int, db):
+
     result = await db.execute(
         select(EmployeeDocument).where(EmployeeDocument.id == document_id)
     )
     doc = result.scalar_one_or_none()
 
     if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-    unique_name = f"{doc.employee_id}_{doc.document_type_id}_{uuid.uuid4().hex}_{file.filename}"
-    file_location = os.path.join(UPLOAD_DIR, unique_name)
-
-    with open(file_location, "wb") as f:
-        while chunk := await file.read(1024 * 1024):
-            f.write(chunk)
-
-    if doc.file_path and os.path.exists(doc.file_path):
-        os.remove(doc.file_path)
-
-    doc.file_path = file_location
-
-    await db.commit()
-    await db.refresh(doc)
+        raise HTTPException(404, "Document not found")
 
     return {
         "success": True,
-        "message": "File updated successfully",
-        "data": {
-            "id": doc.id,
-            "file_path": doc.file_path
-        }
+        "download_url": doc.file_path
     }
