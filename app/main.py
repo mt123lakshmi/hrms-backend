@@ -85,12 +85,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
  
 # ==========================
 # 🔥 STATIC FILES
 # ==========================
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
- 
  
  
 # ==========================
@@ -112,15 +112,9 @@ async def startup_event():
     print("✅ Admin check completed")
  
  
-# ==========================
-# 🔐 AUTH ROUTES
-# ==========================
+
 app.include_router(auth_routes.router)
 app.include_router(password.router)
- 
-# ==========================
-# 👑 ADMIN ROUTES
-# ==========================
 app.include_router(admin_dashboard.router)
 app.include_router(master_route.router)
 app.include_router(admin_employee.router)

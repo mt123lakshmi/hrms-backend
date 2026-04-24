@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, UploadFile, File, Form
+from fastapi import APIRouter, Depends, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.database import get_db
@@ -11,6 +11,9 @@ router = APIRouter(
 )
 
 
+# ===============================
+# 🔹 GET EMPLOYEES
+# ===============================
 @router.get("/")
 async def get_employees(
     db: AsyncSession = Depends(get_db),
@@ -19,6 +22,9 @@ async def get_employees(
     return await get_employees_with_payslips(db)
 
 
+# ===============================
+# 🔹 GET EMPLOYEE PAYSLIPS
+# ===============================
 @router.get("/{employee_id}")
 async def get_payslips(
     employee_id: int,
@@ -28,17 +34,28 @@ async def get_payslips(
     return await get_employee_payslips(employee_id, db, user)
 
 
+# ===============================
+# 🔹 UPLOAD PAYSLIP (FIXED)
+# ===============================
 @router.post("/{employee_id}/upload")
 async def upload(
     employee_id: int,
+    background_tasks: BackgroundTasks,   # ✅ moved up
     month: str = Form(...),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     user=Depends(admin_required)
 ):
-    return await upload_payslip(employee_id, month, file, db)
-
-
+    return await upload_payslip(
+        employee_id,
+        month,
+        file,
+        db,
+        background_tasks
+    )
+# ===============================
+# 🔹 UPDATE PAYSLIP
+# ===============================
 @router.put("/{payslip_id}")
 async def update(
     payslip_id: int,
@@ -49,6 +66,9 @@ async def update(
     return await update_payslip(payslip_id, file, db)
 
 
+# ===============================
+# 🔹 DOWNLOAD PAYSLIP
+# ===============================
 @router.get("/download/{payslip_id}")
 async def download(
     payslip_id: int,

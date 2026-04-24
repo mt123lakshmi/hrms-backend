@@ -1,23 +1,26 @@
 import uuid
 from datetime import datetime
-import asyncio
 
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException, UploadFile, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.payslip import Payslip
 from app.models.employee import Employee
 
-# ✅ reuse your existing S3 helper
-from app.utils.s3bucket import upload_file_to_s3
+# S3
+from app.utils.s3bucket import (
+    upload_file_to_s3,
+    extract_s3_key,
+    generate_presigned_download_url
+)
 
-# ✅ email
+# Email
 from app.utils.send_email import send_payslip_email
 
 
 # ===============================
-# 🔹 COMMON S3 UPLOAD (MATCH DOCUMENT CONTROLLER)
+# 🔹 COMMON S3 UPLOAD
 # ===============================
 async def handle_payslip_upload(file: UploadFile, employee_id: int, month: str):
 
@@ -41,7 +44,7 @@ async def handle_payslip_upload(file: UploadFile, employee_id: int, month: str):
 
 
 # ===============================
-# 🔹 GET EMPLOYEE LIST
+# 🔹 GET EMPLOYEES
 # ===============================
 async def get_employees_with_payslips(db: AsyncSession):
 
@@ -97,13 +100,14 @@ async def get_employee_payslips(employee_id: int, db: AsyncSession, user):
 
 
 # ===============================
-# 🔹 UPLOAD PAYSLIP
+# 🔹 UPLOAD PAYSLIP (FIXED EMAIL)
 # ===============================
 async def upload_payslip(
     employee_id: int,
     month: str,
     file: UploadFile,
-    db: AsyncSession
+    db: AsyncSession,
+    background_tasks: BackgroundTasks   # ✅ added
 ):
 
     # 🔹 validate month
@@ -156,14 +160,13 @@ async def upload_payslip(
     await db.commit()
     await db.refresh(payslip)
 
-    # 🔥 email
+    # 🔥 FIXED EMAIL (reliable)
     if employee.company_email:
-        try:
-            asyncio.create_task(
-                send_payslip_email(employee.company_email, file_url)
-            )
-        except Exception as e:
-            print("Email failed:", str(e))
+        background_tasks.add_task(
+            send_payslip_email,
+            employee.company_email,
+            file_url
+        )
 
     return {
         "success": True,
@@ -230,7 +233,10 @@ async def download_payslip(payslip_id: int, db: AsyncSession, user):
     if user.role == "employee" and user.employee_id != payslip.employee_id:
         raise HTTPException(status_code=403, detail="Not allowed")
 
+    file_key = extract_s3_key(payslip.file_path)
+    download_url = generate_presigned_download_url(file_key)
+
     return {
         "success": True,
-        "download_url": payslip.file_path
+        "download_url": download_url
     }

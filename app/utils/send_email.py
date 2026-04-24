@@ -19,24 +19,23 @@ Do not share it with anyone.
     await fm.send_message(message)
 
 
-async def send_payslip_email(email: str, file_path: str):
+async def send_payslip_email(email: str, file_url: str):
 
     message = MessageSchema(
         subject="Payslip Uploaded",
         recipients=[email],
-        body="""
+        body=f"""
 Dear Employee,
 
 Your payslip has been generated and uploaded.
 
-Please find the attached payslip.
+👉 Download your payslip here:
+{file_url}
 
 Regards,  
 HR Team
         """,
-        subtype=MessageType.plain,
-
-        attachments=[file_path]   # 🔥 THIS IS IMPORTANT
+        subtype=MessageType.plain
     )
 
     fm = FastMail(conf)
