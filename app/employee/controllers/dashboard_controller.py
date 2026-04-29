@@ -29,8 +29,10 @@ async def get_employee_dashboard(db: AsyncSession, current_user):
         # =========================================================
         result = await db.execute(
             select(Employee)
-            # ❌ REMOVED WRONG LINE HERE
-            .where(Employee.id == employee_id)
+            .where(
+                Employee.id == employee_id,
+                Employee.company_id == current_user.company_id   # 🔥 FIX ADDED
+            )
         )
         employee = result.scalar_one_or_none()
 
@@ -92,7 +94,7 @@ async def get_employee_dashboard(db: AsyncSession, current_user):
         # =========================================================
         result = await db.execute(
             select(LeaveRequest)
-            .options(selectinload(LeaveRequest.leave_type))  
+            .options(selectinload(LeaveRequest.leave_type))
             .where(LeaveRequest.employee_id == employee_id)
             .order_by(LeaveRequest.start_date.desc())
             .limit(5)
@@ -117,7 +119,10 @@ async def get_employee_dashboard(db: AsyncSession, current_user):
 
         result = await db.execute(
             select(Holiday)
-            .where(Holiday.date >= today)
+            .where(
+                Holiday.date >= today,
+                Holiday.company_id == current_user.company_id   # 🔥 FIX ADDED
+            )
             .order_by(Holiday.date.asc())
         )
         next_holiday = result.scalars().first()
@@ -139,7 +144,7 @@ async def get_employee_dashboard(db: AsyncSession, current_user):
                 "employee": {
                     "name": employee.name,
                     "emp_id": employee.employee_code,
-                    "role": employee.designation 
+                    "role": employee.designation
                 },
                 "leave_balance": total_remaining,
                 "leaves_taken": total_used,

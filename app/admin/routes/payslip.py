@@ -19,7 +19,7 @@ async def get_employees(
     db: AsyncSession = Depends(get_db),
     user=Depends(admin_required)
 ):
-    return await get_employees_with_payslips(db)
+    return await get_employees_with_payslips(db, user)   # 🔥 FIX
 
 
 # ===============================
@@ -35,12 +35,12 @@ async def get_payslips(
 
 
 # ===============================
-# 🔹 UPLOAD PAYSLIP (FIXED)
+# 🔹 UPLOAD PAYSLIP
 # ===============================
 @router.post("/{employee_id}/upload")
 async def upload(
     employee_id: int,
-    background_tasks: BackgroundTasks,   # ✅ moved up
+    background_tasks: BackgroundTasks,
     month: str = Form(...),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
@@ -51,8 +51,11 @@ async def upload(
         month,
         file,
         db,
-        background_tasks
+        background_tasks,
+        user   # 🔥 FIX
     )
+
+
 # ===============================
 # 🔹 UPDATE PAYSLIP
 # ===============================
@@ -63,7 +66,12 @@ async def update(
     db: AsyncSession = Depends(get_db),
     user=Depends(admin_required)
 ):
-    return await update_payslip(payslip_id, file, db)
+    return await update_payslip(
+        payslip_id,
+        file,
+        db,
+        user   # 🔥 FIX
+    )
 
 
 # ===============================

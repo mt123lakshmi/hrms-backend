@@ -1,8 +1,8 @@
-from sqlalchemy import Column, Integer, String, Date, Enum, TIMESTAMP
+from sqlalchemy import Column, Integer, String, Date, Enum, TIMESTAMP,ForeignKey
 from sqlalchemy.sql import func
 from app.database.database import Base
 import enum
-
+from sqlalchemy.orm import relationship
 
 class HolidayType(str, enum.Enum):
     PUBLIC = "Public"
@@ -18,3 +18,5 @@ class Holiday(Base):
     type = Column(Enum(HolidayType), nullable=False)
     description = Column(String(255))
     created_at = Column(TIMESTAMP, server_default=func.now())
+    company_id = Column(Integer, ForeignKey("company.id"))
+    company = relationship("Company")

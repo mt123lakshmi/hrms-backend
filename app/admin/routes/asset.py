@@ -23,9 +23,9 @@ router = APIRouter(
 @router.get("/")
 async def get_assets(
     db: AsyncSession = Depends(get_db),
-    user = Depends(admin_required)
+    user=Depends(admin_required)
 ):
-    return await get_assets_controller(db)
+    return await get_assets_controller(db, user)   # 🔥 FIX
 
 
 # 🔹 ACTION (ASSIGN / UNASSIGN)
@@ -34,13 +34,15 @@ async def asset_action(
     asset_id: int,
     data: AssetActionRequest,
     db: AsyncSession = Depends(get_db),
-    user = Depends(admin_required)
+    user=Depends(admin_required)
 ):
-    return await asset_action_controller(asset_id, data, db)
+    return await asset_action_controller(asset_id, data, db, user)   # 🔥 FIX
 
+
+# 🔹 DOWNLOAD
 @router.get("/download")
 async def download_assets(
     db: AsyncSession = Depends(get_db),
     user=Depends(admin_required)
 ):
-    return await download_assets_excel_controller(db)
+    return await download_assets_excel_controller(db, user)   # 🔥 FIX

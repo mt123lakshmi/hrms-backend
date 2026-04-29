@@ -1,18 +1,41 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, date
+from fastapi import HTTPException
 
 from app.models.task import Task
 from app.models.work_log import WorkLog
 from app.models.taskassignment import TaskAssignment
+from app.models.employee import Employee   
 
 from app.schemas.employee.worklog_schema import WorkLogResponse
+
+
+# =========================================================
+# 🔹 VALIDATE EMPLOYEE (COMMON)
+# =========================================================
+async def validate_employee(db, employee_id, current_user):
+
+    result = await db.execute(
+        select(Employee).where(
+            Employee.id == employee_id,
+            Employee.company_id == current_user.company_id   # 🔥 CRITICAL
+        )
+    )
+
+    employee = result.scalar_one_or_none()
+
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
 
 
 # ==========================
 # GET TASKS (FIXED)
 # ==========================
-async def get_my_tasks(employee_id: int, db: AsyncSession):
+async def get_my_tasks(employee_id: int, db: AsyncSession, current_user):
+
+    # 🔥 VALIDATE EMPLOYEE
+    await validate_employee(db, employee_id, current_user)
 
     result = await db.execute(
         select(Task, TaskAssignment)
@@ -64,12 +87,30 @@ async def get_my_tasks(employee_id: int, db: AsyncSession):
 # ==========================
 # CREATE WORKLOG (FIXED)
 # ==========================
-async def create_worklog(employee_id: int, data, db: AsyncSession):
+async def create_worklog(employee_id: int, data, db: AsyncSession, current_user):
+
+    # 🔥 VALIDATE EMPLOYEE
+    await validate_employee(db, employee_id, current_user)
 
     task = await db.get(Task, data.task_id)
 
     if not task:
         return {"error": "Task not found"}
+
+    # 🔥 OPTIONAL SAFETY (if tasks are company-based)
+    if hasattr(task, "company_id") and task.company_id != current_user.company_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # 🔥 CHECK TASK ASSIGNED TO EMPLOYEE
+    assignment = await db.execute(
+        select(TaskAssignment).where(
+            TaskAssignment.employee_id == employee_id,
+            TaskAssignment.task_id == data.task_id
+        )
+    )
+
+    if not assignment.scalar():
+        raise HTTPException(status_code=403, detail="Task not assigned to employee")
 
     if data.date < task.start_date or data.date > task.end_date:
         return {"error": "Cannot log outside task date range"}
@@ -108,9 +149,12 @@ async def create_worklog(employee_id: int, data, db: AsyncSession):
 
 
 # ==========================
-# GET HISTORY (UNCHANGED)
+# GET HISTORY (UNCHANGED + SAFE)
 # ==========================
-async def get_my_history(employee_id: int, db: AsyncSession):
+async def get_my_history(employee_id: int, db: AsyncSession, current_user):
+
+    # 🔥 VALIDATE EMPLOYEE
+    await validate_employee(db, employee_id, current_user)
 
     result = await db.execute(
         select(WorkLog)
@@ -118,6 +162,6 @@ async def get_my_history(employee_id: int, db: AsyncSession):
         .order_by(WorkLog.date.desc())
     )
 
-    logs = result.scalars().all()
+    logs = result.scalars().all()  
 
     return [WorkLogResponse.from_orm_with_format(log) for log in logs]

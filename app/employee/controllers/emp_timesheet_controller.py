@@ -1,9 +1,10 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from fastapi import HTTPException
-from datetime import date as dt_date, datetime,timedelta
+from datetime import date as dt_date, datetime, timedelta
 
 from app.models.timesheet import TimeSheet
+from app.models.employee import Employee   # 🔥 ADDED
 from app.utils.time_utils import calculate_duration
 
 
@@ -14,18 +15,37 @@ def format_time(t):
 
 
 # =========================
+# 🔹 VALIDATE EMPLOYEE (COMMON)
+# =========================
+async def validate_employee(db, employee_id, current_user):
+
+    result = await db.execute(
+        select(Employee).where(
+            Employee.id == employee_id,
+            Employee.company_id == current_user.company_id
+        )
+    )
+
+    employee = result.scalar_one_or_none()
+
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+
+# =========================
 # UPSERT TIMESHEET
 # =========================
-async def upsert_timesheet(db: AsyncSession, employee_id: int, data):
+async def upsert_timesheet(db: AsyncSession, employee_id: int, data, current_user):
 
-    # ✅ FIXED: allow work_update also
+    # 🔥 VALIDATE EMPLOYEE
+    await validate_employee(db, employee_id, current_user)
+
     if not (data.check_in or data.check_out or data.work_update):
         raise HTTPException(
             status_code=400,
             detail="Provide at least one field (check_in, check_out, work_update)"
         )
 
-    # ✅ PREVENT FUTURE DATE
     if data.date > dt_date.today():
         raise HTTPException(status_code=400, detail="Future date not allowed")
 
@@ -38,11 +58,9 @@ async def upsert_timesheet(db: AsyncSession, employee_id: int, data):
     ts = result.scalar_one_or_none()
 
     # =========================
-    # CREATE (NEW ENTRY)
+    # CREATE
     # =========================
     if not ts:
-
-        # ❌ REMOVED: forcing check-in first
 
         ts = TimeSheet(
             employee_id=employee_id,
@@ -54,7 +72,6 @@ async def upsert_timesheet(db: AsyncSession, employee_id: int, data):
             approval_status="Pending"
         )
 
-        # ✅ VALIDATE + CALCULATE DURATION
         if ts.check_in and ts.check_out:
             check_in_dt = datetime.combine(ts.date, ts.check_in)
             check_out_dt = datetime.combine(ts.date, ts.check_out)
@@ -67,19 +84,16 @@ async def upsert_timesheet(db: AsyncSession, employee_id: int, data):
         db.add(ts)
 
     # =========================
-    # UPDATE (EXISTING ENTRY)
+    # UPDATE
     # =========================
     else:
 
-        # ❌ prevent duplicate check-in
         if data.check_in and ts.check_in:
             raise HTTPException(status_code=400, detail="Already checked in")
 
-        # ✅ ALLOW CHECK-IN IF MISSING
         if data.check_in and not ts.check_in:
             ts.check_in = data.check_in
 
-        # ✅ CHECK-OUT LOGIC
         if data.check_out:
             if not ts.check_in:
                 raise HTTPException(status_code=400, detail="Check-in missing")
@@ -95,11 +109,9 @@ async def upsert_timesheet(db: AsyncSession, employee_id: int, data):
 
             ts.check_out = data.check_out
 
-        # ✅ FIXED: allow work_update independently
         if data.work_update:
             ts.work_update = data.work_update
 
-        # ✅ CALCULATE DURATION
         if ts.check_in and ts.check_out:
             ts.duration = calculate_duration(ts.check_in, ts.check_out)
 
@@ -112,7 +124,10 @@ async def upsert_timesheet(db: AsyncSession, employee_id: int, data):
 # =========================
 # GET TIMESHEETS
 # =========================
-async def get_employee_timesheets(db: AsyncSession, employee_id: int):
+async def get_employee_timesheets(db: AsyncSession, employee_id: int, current_user):
+
+    # 🔥 VALIDATE EMPLOYEE
+    await validate_employee(db, employee_id, current_user)
 
     last_45_days = datetime.now().date() - timedelta(days=45)
 
@@ -120,7 +135,7 @@ async def get_employee_timesheets(db: AsyncSession, employee_id: int):
         select(TimeSheet)
         .where(
             TimeSheet.employee_id == employee_id,
-            TimeSheet.date >= last_45_days   # ✅ THIS IS THE FIX
+            TimeSheet.date >= last_45_days
         )
         .order_by(TimeSheet.date.desc())
     )

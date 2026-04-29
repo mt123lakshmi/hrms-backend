@@ -4,12 +4,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
+
 from app.models.employee import Employee
 from app.models.employee_financial import EmployeeFinancialDetail
 from app.models.employee_asset import EmployeeAsset
 from app.models.payslip import Payslip
- 
- 
+
+
+# =========================================================
+# 🔹 GET PROFILE
+# =========================================================
 async def get_employee_profile_controller(db: AsyncSession, current_user):
 
     employee_id = current_user.employee_id
@@ -22,12 +26,13 @@ async def get_employee_profile_controller(db: AsyncSession, current_user):
         }
 
     # =========================================================
-    # 🔹 EMPLOYEE (FIXED HERE)
+    # 🔹 EMPLOYEE (🔥 FIXED WITH COMPANY CHECK)
     # =========================================================
     result = await db.execute(
-        select(Employee)
-        # ❌ removed selectinload(Employee.designation)
-        .where(Employee.id == employee_id)
+        select(Employee).where(
+            Employee.id == employee_id,
+            Employee.company_id == current_user.company_id   # 🔥 CRITICAL FIX
+        )
     )
     employee = result.scalar_one_or_none()
 
@@ -77,7 +82,7 @@ async def get_employee_profile_controller(db: AsyncSession, current_user):
     personal_email = getattr(employee, "personal_email", None)
     address = getattr(employee, "address", None)
 
-    designation_name = employee.designation  # ✅ correct usage
+    designation_name = employee.designation
 
     # =========================================================
     # 🔥 FINAL RESPONSE
@@ -143,9 +148,9 @@ async def get_employee_profile_controller(db: AsyncSession, current_user):
     }
 
 
-
-# app/controllers/employee_controller.py
-
+# =========================================================
+# 🔹 UPDATE PROFILE
+# =========================================================
 async def update_profile(db: AsyncSession, current_user, data):
 
     employee = current_user.employee
@@ -153,14 +158,17 @@ async def update_profile(db: AsyncSession, current_user, data):
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    # ❌ nothing provided
+    # 🔥 COMPANY VALIDATION
+    if employee.company_id != current_user.company_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
     if data.phone_number is None and data.personal_email is None:
         raise HTTPException(
             status_code=400,
             detail="At least one field (phone_number or personal_email) is required"
         )
 
-    # ✅ update mobile
+    # 🔹 update mobile
     if data.phone_number is not None:
         phone_number = data.phone_number.strip()
 
@@ -170,7 +178,7 @@ async def update_profile(db: AsyncSession, current_user, data):
         if phone_number != employee.phone_number:
             employee.phone_number = phone_number
 
-    # ✅ update email
+    # 🔹 update email
     if data.personal_email is not None:
         if data.personal_email != employee.personal_email:
             employee.personal_email = data.personal_email
@@ -186,16 +194,18 @@ async def update_profile(db: AsyncSession, current_user, data):
         }
     }
 
-async def change_password(db, current_user, data):
+
+# =========================================================
+# 🔹 CHANGE PASSWORD
+# =========================================================
+async def change_password(db: AsyncSession, current_user, data):
 
     current_password = data.current_password.strip().encode("utf-8")
     new_password = data.new_password.strip().encode("utf-8")
 
-    # ✅ verify old password
     if not bcrypt.checkpw(current_password, current_user.password.encode("utf-8")):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
 
-    # ✅ hash new password
     hashed_password = bcrypt.hashpw(new_password, bcrypt.gensalt()).decode("utf-8")
 
     current_user.password = hashed_password

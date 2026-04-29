@@ -1,3 +1,5 @@
+# app/admin/routes/timesheet.py
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
@@ -12,50 +14,68 @@ from app.admin.controllers.timesheet_controller import (
 
 from app.schemas.admin.timesheet_schema import (
     LatestTimeSheetResponse,
-    TimeSheetHistoryResponse,
+    TimeSheetHistoryGroupedResponse,   # 🔥 FIXED
     TimeSheetActionRequest
 )
 
-# ✅ IMPORT ADMIN DEPENDENCY
 from app.core.dependencies import admin_required
 
 
-# ✅ APPLY ADMIN ACCESS GLOBALLY (BEST PRACTICE)
 router = APIRouter(
     prefix="/timesheet",
-    tags=["Timesheet"],
-    dependencies=[Depends(admin_required)]   # 🔥 THIS IS THE FIX
+    tags=["Timesheet"]
 )
 
 
-# ✅ LIST VIEW (ALL EMPLOYEES)
+# =========================================================
+# ✅ LIST VIEW (ALL EMPLOYEES) → NO CHANGE
+# =========================================================
 @router.get("/latest", response_model=List[LatestTimeSheetResponse])
-async def latest_timesheets(db: AsyncSession = Depends(get_db)):
-    return await get_latest_timesheets(db)
+async def latest_timesheets(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(admin_required)
+):
+    return await get_latest_timesheets(db, user)
 
 
-# ✅ DETAIL VIEW (SINGLE EMPLOYEE)
+# =========================================================
+# ✅ DETAIL VIEW (SINGLE EMPLOYEE) → NO CHANGE
+# =========================================================
 @router.get("/latest/{employee_id}", response_model=LatestTimeSheetResponse)
-async def latest_single(employee_id: int, db: AsyncSession = Depends(get_db)):
-    return await get_latest_timesheet_by_employee(db, employee_id)
+async def latest_single(
+    employee_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(admin_required)
+):
+    return await get_latest_timesheet_by_employee(db, employee_id, user)
 
 
-# ✅ HISTORY
-@router.get("/history/{employee_id}", response_model=List[TimeSheetHistoryResponse])
-async def history(employee_id: int, db: AsyncSession = Depends(get_db)):
-    return await get_employee_history(db, employee_id)
+# =========================================================
+# 🔥 HISTORY (FIXED — GROUPED RESPONSE)
+# =========================================================
+@router.get("/history/{employee_id}", response_model=TimeSheetHistoryGroupedResponse)
+async def history(
+    employee_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(admin_required)
+):
+    return await get_employee_history(db, employee_id, user)
 
 
-# ✅ ACTION (APPROVE / REJECT)
+# =========================================================
+# ✅ ACTION (NO CHANGE)
+# =========================================================
 @router.put("/action/{timesheet_id}")
 async def action(
     timesheet_id: int,
     request: TimeSheetActionRequest,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    user=Depends(admin_required)
 ):
     return await timesheet_action(
         db,
         timesheet_id,
         request.action,
-        request.reason
+        request.reason,
+        user=user
     )

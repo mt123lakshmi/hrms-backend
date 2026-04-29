@@ -9,11 +9,15 @@ from datetime import datetime, date
 
 
 # =========================================================
-# GET ALL EMPLOYEES (UNCHANGED)
+# GET ALL EMPLOYEES
 # =========================================================
-async def get_all_employees(db):
+async def get_all_employees(db, user):
 
-    res = await db.execute(select(Employee))
+    res = await db.execute(
+        select(Employee).where(
+            Employee.company_id == user.company_id   # 🔥 FIX
+        )
+    )
     employees = res.scalars().all()
 
     data = []
@@ -52,18 +56,25 @@ async def get_all_employees(db):
 
 
 # =========================================================
-# EMPLOYEE DASHBOARD (FIXED)
+# EMPLOYEE DASHBOARD
 # =========================================================
-async def get_task_dashboard(emp_id, db):
+async def get_task_dashboard(emp_id, db, user):
 
-    emp = await db.get(Employee, emp_id)
+    result = await db.execute(
+        select(Employee).where(
+            Employee.id == emp_id,
+            Employee.company_id == user.company_id   # 🔥 FIX
+        )
+    )
+    emp = result.scalar_one_or_none()
 
     if not emp:
         return {"error": "Employee not found"}
 
-    # total assigned tasks
     tasks_res = await db.execute(
-        select(Task).join(TaskAssignment).where(TaskAssignment.employee_id == emp_id)
+        select(Task)
+        .join(TaskAssignment)
+        .where(TaskAssignment.employee_id == emp_id)
     )
     tasks_list = tasks_res.scalars().all()
 
@@ -76,12 +87,10 @@ async def get_task_dashboard(emp_id, db):
 
     for task in tasks_list:
 
-        # 🔥 FIXED HERE (ONLY CHANGE)
         if today < task.end_date:
             pending += 1
             continue
 
-        # 🔥 GET ALL LOGS FOR TASK
         logs_res = await db.execute(
             select(WorkLog.status).where(
                 WorkLog.employee_id == emp_id,
@@ -90,19 +99,13 @@ async def get_task_dashboard(emp_id, db):
         )
         logs = logs_res.scalars().all()
 
-        # 🔥 COMPLETION LOGIC (UNCHANGED BEHAVIOR)
         if not logs:
             pending += 1
-
         elif any(l == "APPROVED" for l in logs):
             completed += 1
-
         else:
             pending += 1
 
-    # =========================
-    # ANALYTICS (UNCHANGED)
-    # =========================
     approved = await db.scalar(
         select(func.count()).where(
             WorkLog.employee_id == emp_id,
@@ -119,9 +122,6 @@ async def get_task_dashboard(emp_id, db):
 
     total = approved + rejected
 
-    # =========================
-    # TIMESHEET HISTORY (UNCHANGED)
-    # =========================
     logs_result = await db.execute(
         select(WorkLog)
         .where(WorkLog.employee_id == emp_id)
@@ -178,14 +178,21 @@ async def get_task_dashboard(emp_id, db):
 
 
 # =========================================================
-# ASSIGN TASK (UNCHANGED)
+# ASSIGN TASK
 # =========================================================
-async def assign_task(data, db):
+async def assign_task(data, db, user):
 
     if data.start_date > data.end_date:
         return {"error": "Start date cannot be after end date"}
 
-    emp = await db.get(Employee, data.employee_id)
+    result = await db.execute(
+        select(Employee).where(
+            Employee.id == data.employee_id,
+            Employee.company_id == user.company_id   # 🔥 FIX
+        )
+    )
+    emp = result.scalar_one_or_none()
+
     if not emp:
         return {"error": "Employee not found"}
 
@@ -194,7 +201,8 @@ async def assign_task(data, db):
         description=data.description,
         start_date=data.start_date,
         end_date=data.end_date,
-        frequency=data.frequency
+        frequency=data.frequency,
+        company_id=user.company_id   # 🔥 IMPORTANT
     )
 
     db.add(task)
@@ -217,11 +225,19 @@ async def assign_task(data, db):
 
 
 # =========================================================
-# APPROVE (UNCHANGED)
+# APPROVE WORKLOG
 # =========================================================
-async def approve_worklog(worklog_id, db):
+async def approve_worklog(worklog_id, db, user):
 
-    log = await db.get(WorkLog, worklog_id)
+    result = await db.execute(
+        select(WorkLog)
+        .join(Employee, WorkLog.employee_id == Employee.id)
+        .where(
+            WorkLog.id == worklog_id,
+            Employee.company_id == user.company_id   # 🔥 FIX
+        )
+    )
+    log = result.scalar_one_or_none()
 
     if not log:
         return {"error": "Worklog not found"}
@@ -235,11 +251,19 @@ async def approve_worklog(worklog_id, db):
 
 
 # =========================================================
-# REJECT (UNCHANGED)
+# REJECT WORKLOG
 # =========================================================
-async def reject_worklog(worklog_id, reason, db):
+async def reject_worklog(worklog_id, reason, db, user):
 
-    log = await db.get(WorkLog, worklog_id)
+    result = await db.execute(
+        select(WorkLog)
+        .join(Employee, WorkLog.employee_id == Employee.id)
+        .where(
+            WorkLog.id == worklog_id,
+            Employee.company_id == user.company_id   # 🔥 FIX
+        )
+    )
+    log = result.scalar_one_or_none()
 
     if not log:
         return {"error": "Worklog not found"}
@@ -247,7 +271,7 @@ async def reject_worklog(worklog_id, reason, db):
     log.status = "REJECTED"
     log.rejection_reason = reason
 
-    await db.commit()   # ✅ FIRST commit
+    await db.commit()
 
     employee = await db.get(Employee, log.employee_id)
 

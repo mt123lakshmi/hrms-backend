@@ -15,7 +15,7 @@ from datetime import datetime
 # ===============================
 # 🔹 GET ALL LEAVES (ADMIN)
 # ===============================
-async def get_leave_list_controller(db: AsyncSession):
+async def get_leave_list_controller(db: AsyncSession, user):   # 🔥 ADDED user
 
     result = await db.execute(
         select(
@@ -31,6 +31,7 @@ async def get_leave_list_controller(db: AsyncSession):
         )
         .join(Employee, LeaveRequest.employee_id == Employee.id)
         .outerjoin(LeaveType, LeaveRequest.leave_type_id == LeaveType.id)
+        .where(Employee.company_id == user.company_id)   # 🔥 CRITICAL FIX
     )
 
     leaves = result.all()
@@ -56,14 +57,18 @@ async def get_leave_list_controller(db: AsyncSession):
 # ===============================
 # 🔹 GET INSIGHTS (ADMIN)
 # ===============================
-async def get_leave_insights(employee_id: int, db: AsyncSession):
+async def get_leave_insights(employee_id: int, db: AsyncSession, user):  # 🔥 ADDED user
 
-    TOTAL_LEAVES = 18  # safe for now
+    TOTAL_LEAVES = 18
 
     result = await db.execute(
         select(LeaveRequest)
+        .join(Employee)   # 🔥 ADDED
         .options(selectinload(LeaveRequest.leave_type))
-        .where(LeaveRequest.employee_id == employee_id)
+        .where(
+            LeaveRequest.employee_id == employee_id,
+            Employee.company_id == user.company_id   # 🔥 CRITICAL FIX
+        )
     )
 
     all_leaves = result.scalars().all()
@@ -100,7 +105,6 @@ async def get_leave_insights(employee_id: int, db: AsyncSession):
 
     for l in approved_leaves:
 
-        # ✅ correct day calculation
         days = (
             l.total_days
             if l.total_days
@@ -170,13 +174,18 @@ async def leave_action_controller(
     action: str,
     db: AsyncSession,
     reason: str = None,
-    admin_id: int = None
+    admin_id: int = None,
+    user=None   # 🔥 ADDED
 ):
 
     result = await db.execute(
         select(LeaveRequest)
+        .join(Employee)   # 🔥 ADDED
         .options(selectinload(LeaveRequest.leave_type))
-        .where(LeaveRequest.id == leave_id)
+        .where(
+            LeaveRequest.id == leave_id,
+            Employee.company_id == user.company_id   # 🔥 CRITICAL FIX
+        )
     )
     leave = result.scalar_one_or_none()
 
@@ -200,29 +209,20 @@ async def leave_action_controller(
 
     leave_type = leave.leave_type
 
-    # ✅ FIXED DAY CALCULATION
     requested_days = (
         leave.total_days
         if leave.total_days
         else (leave.end_date - leave.start_date).days + 1
     )
 
-    # ===============================
-    # 🔴 SICK & CASUAL VALIDATION (FIXED)
-    # ===============================
     if leave_type.max_per_quarter:
 
         result = await db.execute(
             select(LeaveRequest).where(
                 LeaveRequest.employee_id == leave.employee_id,
                 LeaveRequest.leave_type_id == leave.leave_type_id,
-
-                # ✅ FIX 1: ONLY APPROVED
                 LeaveRequest.status == "Approved",
-
-                # ✅ FIX 2: EXCLUDE CURRENT LEAVE
                 LeaveRequest.id != leave.id,
-
                 extract('quarter', LeaveRequest.start_date) == extract('quarter', leave.start_date),
                 extract('year', LeaveRequest.start_date) == extract('year', leave.start_date)
             )
@@ -236,9 +236,6 @@ async def leave_action_controller(
                 detail=f"{leave_type.name} already used this quarter"
             )
 
-    # ===============================
-    # 🔴 EARNED LEAVE
-    # ===============================
     if leave_type.name.strip().lower() == "earned":
 
         balance = await db.scalar(
@@ -268,9 +265,6 @@ async def leave_action_controller(
         balance.earned_leave_used += requested_days
         balance.earned_leave_remaining -= requested_days
 
-    # ===============================
-    # 🔹 FINAL UPDATE
-    # ===============================
     leave.status = action.capitalize()
 
     if action.lower() == "rejected":

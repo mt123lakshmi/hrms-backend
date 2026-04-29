@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.database import get_db
@@ -21,10 +21,15 @@ async def employee_dashboard(
     try:
         return await get_employee_dashboard(db, current_user)
 
+    # ✅ let proper HTTP errors pass through
+    except HTTPException as e:
+        raise e
+
+    # ✅ handle unexpected errors properly
     except Exception as e:
-        # 🔥 controlled error response (prevents 500 crash)
-        return {
-            "success": False,
-            "message": "Failed to fetch dashboard",
-            "data": None
-        }
+        print("EMPLOYEE DASHBOARD ERROR:", str(e))  # 🔥 debugging
+
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to fetch dashboard"
+        )

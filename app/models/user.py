@@ -16,7 +16,7 @@ class User(Base):
 
     employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
     employee = relationship("Employee", back_populates="user", lazy="selectin")
-
+    company_id = Column(Integer, ForeignKey("company.id"))
     # 🔥 ADD THESE (CRITICAL)
     otp = Column(String(10), nullable=True)
     otp_expiry = Column(DateTime, nullable=True)

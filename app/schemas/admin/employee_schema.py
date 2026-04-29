@@ -18,7 +18,7 @@ class CreateEmployeeRequest(BaseModel):
     employee_code: str
     name: str
     phone_number: str
-    address: str
+    address: Optional[str] = None
     company_email: str
     personal_email: str
 
@@ -29,7 +29,7 @@ class CreateEmployeeRequest(BaseModel):
 
     bank_account: str
     pan_number: str
-    uan_number: str
+    uan_number: Optional[str] = None
 
     # ✅ FIXED — inside class + optional
     access_card: Optional[str] = None

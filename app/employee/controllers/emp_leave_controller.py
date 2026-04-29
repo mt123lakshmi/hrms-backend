@@ -7,25 +7,42 @@ from app.models.leave_request import LeaveRequest
 from app.models.leave_type import LeaveType
 from app.models.leave_balance import LeaveBalance
 from app.models.day_type import DayType
+from app.models.employee import Employee   # 🔥 ADDED
 
 
+# =========================================================
 # 🔹 WORKING DAYS CALCULATION
+# =========================================================
 def calculate_working_days(start_date, end_date):
     total_days = 0
     current = start_date
 
     while current <= end_date:
-        if current.weekday() < 5:  # Mon-Fri only
+        if current.weekday() < 5:
             total_days += 1
         current += timedelta(days=1)
 
     return total_days
 
 
+# =========================================================
 # 🔹 GET ALL LEAVES
+# =========================================================
 async def get_employee_leaves(db: AsyncSession, current_user):
 
     employee_id = current_user.employee_id
+
+    # 🔥 VALIDATE EMPLOYEE (CRITICAL)
+    result = await db.execute(
+        select(Employee).where(
+            Employee.id == employee_id,
+            Employee.company_id == current_user.company_id
+        )
+    )
+    employee = result.scalar_one_or_none()
+
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
 
     result = await db.execute(
         select(LeaveRequest, LeaveType.name)
@@ -42,7 +59,7 @@ async def get_employee_leaves(db: AsyncSession, current_user):
             "id": leave.id,
             "start_date": leave.start_date,
             "end_date": leave.end_date,
-            "type": type_name,  # ✅ FIXED (name instead of ID)
+            "type": type_name,
             "day_type_id": leave.day_type_id,
             "reason": leave.reason,
             "status": leave.status,
@@ -57,9 +74,25 @@ async def get_employee_leaves(db: AsyncSession, current_user):
         "data": data
     }
 
-# 🔹 VALIDATION
-async def validate_leave_request(db, employee_id, leave_type_id, start_date, end_date):
 
+# =========================================================
+# 🔹 VALIDATION
+# =========================================================
+async def validate_leave_request(db, current_user, employee_id, leave_type_id, start_date, end_date):
+
+    # 🔥 VALIDATE EMPLOYEE AGAIN (SAFE PRACTICE)
+    emp_check = await db.execute(
+        select(Employee).where(
+            Employee.id == employee_id,
+            Employee.company_id == current_user.company_id
+        )
+    )
+    employee = emp_check.scalar_one_or_none()
+
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    # 🔹 Leave Type
     leave_type = await db.get(LeaveType, leave_type_id)
 
     if not leave_type:
@@ -85,19 +118,18 @@ async def validate_leave_request(db, employee_id, leave_type_id, start_date, end
                 detail=f"{leave_type.name} leave already used this quarter"
             )
 
-    # 🔹 Earned leave balance
+    # 🔹 Earned leave balance (FIXED)
     if leave_type.name.lower() == "earned":
 
         requested_days = (end_date - start_date).days + 1
 
         balance = await db.scalar(
             select(LeaveBalance).where(
-                LeaveBalance.employee_id == employee_id,
-                LeaveBalance.leave_type_id == leave_type_id
+                LeaveBalance.employee_id == employee_id
             )
         )
 
-        if not balance or balance.balance < requested_days:
+        if not balance or balance.total_leaves < requested_days:
             raise HTTPException(
                 status_code=400,
                 detail="Insufficient earned leave balance"
@@ -124,10 +156,24 @@ async def validate_leave_request(db, employee_id, leave_type_id, start_date, end
         )
 
 
+# =========================================================
 # 🔹 CREATE LEAVE
+# =========================================================
 async def create_leave_request(db: AsyncSession, current_user, payload):
 
     employee_id = current_user.employee_id
+
+    # 🔥 VALIDATE EMPLOYEE
+    result = await db.execute(
+        select(Employee).where(
+            Employee.id == employee_id,
+            Employee.company_id == current_user.company_id
+        )
+    )
+    employee = result.scalar_one_or_none()
+
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
 
     if payload.start_date > payload.end_date:
         return {
@@ -136,19 +182,19 @@ async def create_leave_request(db: AsyncSession, current_user, payload):
             "data": None
         }
 
-    # 🔹 Fetch day type
+    # 🔹 Day type
     day_type = await db.get(DayType, payload.day_type_id)
     if not day_type:
         raise HTTPException(status_code=400, detail="Invalid day type")
 
-    # 🔥 HALF DAY VALIDATION
+    # 🔥 Half day validation
     if day_type.name.lower() == "half" and payload.start_date != payload.end_date:
         raise HTTPException(
             status_code=400,
             detail="Half day leave must be for a single day"
         )
 
-    # 🔹 Calculate total days
+    # 🔹 Total days
     if day_type.name.lower() == "half":
         total_days = 0.5
     else:
@@ -164,20 +210,21 @@ async def create_leave_request(db: AsyncSession, current_user, payload):
             "data": None
         }
 
-    # 🔹 Validate business rules
+    # 🔹 Business validation
     await validate_leave_request(
         db,
+        current_user,
         employee_id,
         payload.leave_type_id,
         payload.start_date,
         payload.end_date
     )
 
-    # 🔹 Create record
+    # 🔹 Create leave
     new_leave = LeaveRequest(
         employee_id=employee_id,
         leave_type_id=payload.leave_type_id,
-        day_type_id=payload.day_type_id,   # ✅ added
+        day_type_id=payload.day_type_id,
         start_date=payload.start_date,
         end_date=payload.end_date,
         reason=payload.reason,

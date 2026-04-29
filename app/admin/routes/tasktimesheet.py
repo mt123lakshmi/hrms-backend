@@ -25,7 +25,7 @@ async def employees(
     db: AsyncSession = Depends(get_db),
     user=Depends(admin_required)
 ):
-    return await get_all_employees(db)
+    return await get_all_employees(db, user)   # 🔥 FIX
 
 
 # =========================================================
@@ -37,19 +37,19 @@ async def dashboard(
     db: AsyncSession = Depends(get_db),
     user=Depends(admin_required)
 ):
-    return await get_task_dashboard(emp_id, db)
+    return await get_task_dashboard(emp_id, db, user)   # 🔥 FIX
 
 
 # =========================================================
-# 3. ASSIGN TASK (FIXED)
+# 3. ASSIGN TASK
 # =========================================================
 @router.post("/assign-task")
 async def assign(
-    data: TaskCreate,   # 🔥 FIXED → BODY NOT QUERY
+    data: TaskCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(admin_required)
 ):
-    return await assign_task(data, db)
+    return await assign_task(data, db, user)   # 🔥 FIX
 
 
 # =========================================================
@@ -61,7 +61,7 @@ async def approve(
     db: AsyncSession = Depends(get_db),
     user=Depends(admin_required)
 ):
-    return await approve_worklog(log_id, db)
+    return await approve_worklog(log_id, db, user)   # 🔥 FIX
 
 
 # =========================================================
@@ -74,4 +74,4 @@ async def reject(
     db: AsyncSession = Depends(get_db),
     user=Depends(admin_required)
 ):
-    return await reject_worklog(log_id, reason, db)
+    return await reject_worklog(log_id, reason, db, user)   # 🔥 FIX

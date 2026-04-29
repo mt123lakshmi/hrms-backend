@@ -46,9 +46,13 @@ async def handle_payslip_upload(file: UploadFile, employee_id: int, month: str):
 # ===============================
 # 🔹 GET EMPLOYEES
 # ===============================
-async def get_employees_with_payslips(db: AsyncSession):
+async def get_employees_with_payslips(db: AsyncSession, user):   # 🔥 ADDED user
 
-    result = await db.execute(select(Employee))
+    result = await db.execute(
+        select(Employee).where(
+            Employee.company_id == user.company_id   # 🔥 FIX
+        )
+    )
     employees = result.scalars().all()
 
     return {
@@ -73,10 +77,25 @@ async def get_employee_payslips(employee_id: int, db: AsyncSession, user):
     if user.role == "employee" and user.employee_id != employee_id:
         raise HTTPException(status_code=403, detail="Not allowed")
 
+    # 🔥 VALIDATE COMPANY
+    result = await db.execute(
+        select(Employee).where(
+            Employee.id == employee_id,
+            Employee.company_id == user.company_id
+        )
+    )
+    employee = result.scalar_one_or_none()
+
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
     result = await db.execute(
         select(Payslip, Employee)
         .join(Employee, Payslip.employee_id == Employee.id)
-        .where(Payslip.employee_id == employee_id)
+        .where(
+            Payslip.employee_id == employee_id,
+            Employee.company_id == user.company_id   # 🔥 FIX
+        )
     )
 
     records = result.all()
@@ -100,15 +119,28 @@ async def get_employee_payslips(employee_id: int, db: AsyncSession, user):
 
 
 # ===============================
-# 🔹 UPLOAD PAYSLIP (FIXED EMAIL)
+# 🔹 UPLOAD PAYSLIP
 # ===============================
 async def upload_payslip(
     employee_id: int,
     month: str,
     file: UploadFile,
     db: AsyncSession,
-    background_tasks: BackgroundTasks   # ✅ added
+    background_tasks: BackgroundTasks,
+    user   # 🔥 ADDED
 ):
+
+    # 🔥 VALIDATE COMPANY FIRST
+    result = await db.execute(
+        select(Employee).where(
+            Employee.id == employee_id,
+            Employee.company_id == user.company_id
+        )
+    )
+    employee = result.scalar_one_or_none()
+
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
 
     # 🔹 validate month
     try:
@@ -137,15 +169,6 @@ async def upload_payslip(
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Payslip already exists")
 
-    # 🔹 employee check
-    result = await db.execute(
-        select(Employee).where(Employee.id == employee_id)
-    )
-    employee = result.scalar_one_or_none()
-
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-
     # 🔹 upload to S3
     file_url = await handle_payslip_upload(file, employee_id, formatted_month)
 
@@ -160,7 +183,7 @@ async def upload_payslip(
     await db.commit()
     await db.refresh(payslip)
 
-    # 🔥 FIXED EMAIL (reliable)
+    # 🔥 EMAIL
     if employee.company_email:
         background_tasks.add_task(
             send_payslip_email,
@@ -184,11 +207,17 @@ async def upload_payslip(
 async def update_payslip(
     payslip_id: int,
     file: UploadFile,
-    db: AsyncSession
+    db: AsyncSession,
+    user   # 🔥 ADDED
 ):
 
     result = await db.execute(
-        select(Payslip).where(Payslip.id == payslip_id)
+        select(Payslip)
+        .join(Employee, Payslip.employee_id == Employee.id)
+        .where(
+            Payslip.id == payslip_id,
+            Employee.company_id == user.company_id   # 🔥 FIX
+        )
     )
     payslip = result.scalar_one_or_none()
 
@@ -223,7 +252,12 @@ async def update_payslip(
 async def download_payslip(payslip_id: int, db: AsyncSession, user):
 
     result = await db.execute(
-        select(Payslip).where(Payslip.id == payslip_id)
+        select(Payslip)
+        .join(Employee, Payslip.employee_id == Employee.id)
+        .where(
+            Payslip.id == payslip_id,
+            Employee.company_id == user.company_id   # 🔥 FIX
+        )
     )
     payslip = result.scalar_one_or_none()
 

@@ -2,6 +2,7 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+import traceback
 
 from app.core.security import decode_access_token
 from app.database.database import get_db
@@ -11,29 +12,48 @@ security = HTTPBearer()
 
 
 # ===============================
-# 🔹 COMMON FUNCTION (REUSE THIS)
+# 🔹 COMMON FUNCTION (FULL SAFE VERSION)
 # ===============================
 async def get_user_from_token(token: str, db: AsyncSession):
-    payload = decode_access_token(token)
+    try:
+        # ✅ Decode token safely
+        payload = decode_access_token(token)
 
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        if not payload:
+            raise HTTPException(status_code=401, detail="Invalid token")
 
-    user_id = payload.get("user_id")
-    role = payload.get("role", "").lower()   # 🔥 NORMALIZED HERE
+        user_id = payload.get("user_id")
+        role = payload.get("role")
 
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        if not user_id or not role:
+            raise HTTPException(status_code=401, detail="Invalid token payload")
 
-    result = await db.execute(
-        select(User).where(User.id == user_id)
-    )
-    user = result.scalar_one_or_none()
+        role = role.lower()
 
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
+        # ✅ Fetch user safely
+        result = await db.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
 
-    return user, role
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+
+        return user, role
+
+    except HTTPException:
+        # pass through known errors
+        raise
+
+    except Exception:
+        # 🔥 THIS IS WHAT YOU WERE MISSING
+        print("🔥 AUTH ERROR TRACE:")
+        print(traceback.format_exc())
+
+        raise HTTPException(
+            status_code=500,
+            detail="Authentication failed"
+        )
 
 
 # ===============================
@@ -43,6 +63,9 @@ async def admin_required(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_db)
 ):
+    if not credentials or not credentials.credentials:
+        raise HTTPException(status_code=401, detail="Authorization required")
+
     token = credentials.credentials
 
     user, role = await get_user_from_token(token, db)
@@ -60,6 +83,9 @@ async def employee_required(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_db)
 ):
+    if not credentials or not credentials.credentials:
+        raise HTTPException(status_code=401, detail="Authorization required")
+
     token = credentials.credentials
 
     user, role = await get_user_from_token(token, db)
@@ -77,6 +103,9 @@ async def admin_or_employee(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_db)
 ):
+    if not credentials or not credentials.credentials:
+        raise HTTPException(status_code=401, detail="Authorization required")
+
     token = credentials.credentials
 
     user, role = await get_user_from_token(token, db)

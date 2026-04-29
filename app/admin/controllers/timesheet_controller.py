@@ -10,7 +10,7 @@ from app.utils.time_utils import calculate_duration
 
 
 # ✅ GET LATEST TIMESHEET PER EMPLOYEE (LIST VIEW)
-async def get_latest_timesheets(db: AsyncSession):
+async def get_latest_timesheets(db: AsyncSession, user):   # 🔥 ADDED user
 
     subquery = (
         select(
@@ -31,6 +31,7 @@ async def get_latest_timesheets(db: AsyncSession):
                 TimeSheet.date == subquery.c.latest_date
             )
         )
+        .where(Employee.company_id == user.company_id)   # 🔥 CRITICAL FIX
     )
 
     result = await db.execute(stmt)
@@ -42,6 +43,7 @@ async def get_latest_timesheets(db: AsyncSession):
 
         data.append({
             "employee": {
+                "employee_id": emp.id,
                 "name": emp.name,
                 "code": emp.employee_code,
                 "designation": emp.designation
@@ -70,8 +72,19 @@ async def get_latest_timesheets(db: AsyncSession):
 # ✅ GET SINGLE EMPLOYEE LATEST
 async def get_latest_timesheet_by_employee(
     db: AsyncSession,
-    employee_id: int
+    employee_id: int,
+    user   # 🔥 ADDED
 ):
+
+    # 🔥 VALIDATION (company check)
+    emp_check = await db.execute(
+        select(Employee).where(
+            Employee.id == employee_id,
+            Employee.company_id == user.company_id
+        )
+    )
+    if not emp_check.scalar_one_or_none():
+        raise HTTPException(404, "Employee not found")
 
     latest_date = await db.scalar(
         select(func.max(TimeSheet.date)).where(
@@ -122,14 +135,25 @@ async def get_latest_timesheet_by_employee(
     }
 
 
-# ✅ GET HISTORY (FIXED → 45 DAYS + 12-HOUR FORMAT)
-async def get_employee_history(db: AsyncSession, employee_id: int):
+# ✅ GET HISTORY
+async def get_employee_history(db: AsyncSession, employee_id: int, user):
+
+    # 🔥 VALIDATION (company check)
+    emp_check = await db.execute(
+        select(Employee).where(
+            Employee.id == employee_id,
+            Employee.company_id == user.company_id
+        )
+    )
+    emp = emp_check.scalar_one_or_none()
+
+    if not emp:
+        raise HTTPException(404, "Employee not found")
 
     last_45_days = datetime.now() - timedelta(days=45)
 
     stmt = (
-        select(TimeSheet, Employee)
-        .join(Employee, Employee.id == TimeSheet.employee_id)
+        select(TimeSheet)
         .where(
             TimeSheet.employee_id == employee_id,
             TimeSheet.date >= last_45_days
@@ -138,48 +162,49 @@ async def get_employee_history(db: AsyncSession, employee_id: int):
     )
 
     result = await db.execute(stmt)
-    records = result.all()
+    timesheets = result.scalars().all()
 
-    if not records:
-        return []
+    history = []
 
-    data = []
-
-    for ts, emp in records:
-        data.append({
+    for ts in timesheets:
+        history.append({
             "timesheet_id": ts.id,
-
-            "employee_name": emp.name,
-            "employee_code": emp.employee_code,
-            "designation": emp.designation,
-
             "date": ts.date,
-
-            # ✅ FIX APPLIED HERE
             "check_in": ts.check_in.strftime("%I:%M %p") if ts.check_in else None,
             "check_out": ts.check_out.strftime("%I:%M %p") if ts.check_out else None,
-
             "duration": calculate_duration(ts.check_in, ts.check_out),
-
             "work_update": ts.work_update,
             "work_status": ts.work_status,
             "approval_status": ts.approval_status,
             "rejection_reason": ts.rejection_reason
         })
 
-    return data
+    return {
+        "employee_id": emp.id,
+        "employee_name": emp.name,
+        "employee_code": emp.employee_code,
+        "designation": emp.designation,
+        "history": history
+    }
 
 
-# ✅ APPROVE / REJECT (UNCHANGED)
+# ✅ APPROVE / REJECT
 async def timesheet_action(
     db: AsyncSession,
     timesheet_id: int,
     action: str,
-    reason: str = None
+    reason: str = None,
+    user=None   # 🔥 ADDED
 ):
 
+    # 🔥 JOIN + company filter
     result = await db.execute(
-        select(TimeSheet).where(TimeSheet.id == timesheet_id)
+        select(TimeSheet)
+        .join(Employee)
+        .where(
+            TimeSheet.id == timesheet_id,
+            Employee.company_id == user.company_id
+        )
     )
     ts = result.scalar_one_or_none()
 
@@ -225,7 +250,7 @@ async def timesheet_action(
     }
 
 
-# ✅ AUTO DELETE OLD DATA (1 YEAR CLEANUP)
+# ✅ AUTO DELETE OLD DATA (UNCHANGED)
 async def delete_old_timesheets(db: AsyncSession):
 
     query = text("""

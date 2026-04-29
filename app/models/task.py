@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Date, Text
+from sqlalchemy import Column, Integer, String, Date, Text,ForeignKey
 from sqlalchemy.orm import relationship
 from app.database.database import Base
 
@@ -14,6 +14,8 @@ class Task(Base):
     start_date = Column(Date)
     end_date = Column(Date)
     frequency = Column(String(50))
+    company_id = Column(Integer, ForeignKey("company.id"))
 
     # 🔥 REQUIRED
     worklogs = relationship("WorkLog", back_populates="task")
+    company = relationship("Company")

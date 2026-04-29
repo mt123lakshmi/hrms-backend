@@ -16,11 +16,10 @@ class WorkLog(Base):
     check_in = Column(Time, nullable=True)
     check_out = Column(Time, nullable=True)
 
-    description = Column(String)
-    proof = Column(String, nullable=True)
-
-    status = Column(String, default="SUBMITTED")
-    rejection_reason = Column(String, nullable=True)
+    description = Column(String(255))   
+    proof = Column(String(255), nullable=True) 
+    status = Column(String(50), default="SUBMITTED")
+    rejection_reason = Column(String(255), nullable=True)
 
     # ✅ FIX (you missed this earlier)
     task = relationship("Task")

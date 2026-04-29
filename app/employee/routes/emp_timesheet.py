@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends
+# app/employee/routes/timesheet.py
+
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
-from fastapi import HTTPException
+
 from app.database.database import get_db
 from app.schemas.employee.timesheet_schema import (
     TimeSheetCreate,
@@ -12,8 +14,17 @@ from app.employee.controllers.emp_timesheet_controller import (
     get_employee_timesheets
 )
 from app.core.dependencies import employee_required
-router = APIRouter(prefix="/employee/timesheet", tags=["Employee Timesheet"])
 
+
+router = APIRouter(
+    prefix="/employee/timesheet",
+    tags=["Employee Timesheet"]
+)
+
+
+# =========================================================
+# 🔹 SAVE / UPDATE TIMESHEET
+# =========================================================
 @router.post("/")
 async def save_timesheet(
     data: TimeSheetCreate,
@@ -27,9 +38,17 @@ async def save_timesheet(
     if not user.employee_id:
         raise HTTPException(status_code=400, detail="Employee not linked")
 
-    return await upsert_timesheet(db, user.employee_id, data)
+    return await upsert_timesheet(
+        db,
+        user.employee_id,
+        data,
+        user   # 🔥 FIX (CRITICAL)
+    )
 
 
+# =========================================================
+# 🔹 GET TIMESHEETS
+# =========================================================
 @router.get("/", response_model=List[TimeSheetResponse])
 async def get_timesheets(
     db: AsyncSession = Depends(get_db),
@@ -41,4 +60,8 @@ async def get_timesheets(
     if not user.employee_id:
         raise HTTPException(status_code=400, detail="Employee not linked")
 
-    return await get_employee_timesheets(db, user.employee_id)
+    return await get_employee_timesheets(
+        db,
+        user.employee_id,
+        user   # 🔥 FIX (CRITICAL)
+    )

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, Form, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
+
 from app.database.database import get_db
 from app.core.dependencies import admin_required
 from app.schemas.admin.document_type_schema import DocumentTypeCreate
@@ -27,7 +28,8 @@ async def upload_document(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(admin_required)
 ):
-    return await upload_document_controller(emp_id, document_type_id, file, db)
+    # 🔥 FIX: pass current_user
+    return await upload_document_controller(emp_id, document_type_id, file, db, current_user)
 
 
 # 🔥 ADMIN ONLY
@@ -35,14 +37,16 @@ async def upload_document(
 async def get_documents(
     emp_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(admin_required)  # 🔥 enforce admin
+    current_user=Depends(admin_required)
 ):
-    return await get_documents_controller(emp_id, db)
+    # 🔥 FIX
+    return await get_documents_controller(emp_id, db, current_user)
+
 
 @router.get("/types")
 async def get_document_types(
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(admin_required)  # optional
+    current_user=Depends(admin_required)
 ):
     return await get_document_types_controller(db)
 
@@ -53,7 +57,8 @@ async def get_document_by_id(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(admin_required)
 ):
-    return await get_document_by_id_controller(document_id, db)
+    # 🔥 FIX
+    return await get_document_by_id_controller(document_id, db, current_user)
 
 
 @router.post("/create")
@@ -67,15 +72,18 @@ async def create_document_type_api(
 @router.put("/{document_id}")
 async def update_document(
     document_id: int,
-    file: UploadFile = File(...),  # REQUIRED file
+    file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(admin_required)
 ):
+    # 🔥 FIX
     return await update_document_controller(
         db=db,
         document_id=document_id,
-        file=file
+        file=file,
+        user=current_user
     )
+
 
 @router.get("/download/{document_id}")
 async def download_document(
@@ -83,4 +91,5 @@ async def download_document(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(admin_required)
 ):
-    return await download_document_controller(document_id, db)
+    # 🔥 FIX
+    return await download_document_controller(document_id, db, current_user)

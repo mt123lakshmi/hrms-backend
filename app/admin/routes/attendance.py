@@ -18,11 +18,6 @@ async def attendance_overview(
     year: int,
     month: int,
     db: AsyncSession = Depends(get_db),
-    user = Depends(admin_required)  # 🔥 RBAC
+    user=Depends(admin_required)
 ):
-    return await get_attendance_overview_controller(year, month, db)
-
-
-
-
-# "dfghjklkjhgfdsdfghjkjhgfdszxdfgh"    
+    return await get_attendance_overview_controller(year, month, db, user)  # 🔥 FIX

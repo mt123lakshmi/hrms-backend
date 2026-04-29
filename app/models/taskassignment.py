@@ -11,5 +11,5 @@ class TaskAssignment(Base):
     task_id = Column(Integer, ForeignKey("tasks.id"))
     employee_id = Column(Integer, ForeignKey("employees.id"))
 
-    status = Column(String, default="ASSIGNED")
+    status = Column(String(50), default="ASSIGNED")
     assigned_at = Column(DateTime, default=datetime.utcnow)

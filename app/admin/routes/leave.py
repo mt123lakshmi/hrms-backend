@@ -18,9 +18,10 @@ router = APIRouter(prefix="/admin/leaves", tags=["Leave Management"])
 @router.get("/")
 async def get_leaves(
     db: AsyncSession = Depends(get_db),
-    user = Depends(admin_required)
+    user=Depends(admin_required)
 ):
-    return await get_leave_list_controller(db)
+    # 🔥 FIX: pass user
+    return await get_leave_list_controller(db, user)
 
 
 # 🔹 GET INSIGHTS
@@ -28,9 +29,10 @@ async def get_leaves(
 async def get_insights(
     employee_id: int,
     db: AsyncSession = Depends(get_db),
-    user = Depends(admin_required)
+    user=Depends(admin_required)
 ):
-    return await get_leave_insights(employee_id, db)
+    # 🔥 FIX: pass user
+    return await get_leave_insights(employee_id, db, user)
 
 
 # 🔹 APPROVE / REJECT
@@ -39,12 +41,14 @@ async def leave_action(
     leave_id: int,
     payload: LeaveActionRequest,
     db: AsyncSession = Depends(get_db),
-    user = Depends(admin_required)
+    user=Depends(admin_required)
 ):
+    # 🔥 FIX: pass user
     return await leave_action_controller(
         leave_id=leave_id,
         action=payload.action,
         reason=payload.rejection_reason,
         admin_id=user.id,
-        db=db
+        db=db,
+        user=user   # 🔥 CRITICAL
     )
